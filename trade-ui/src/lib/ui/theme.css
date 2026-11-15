@@ -1,0 +1,101 @@
+/* Hyperliquid UI/chart tokens: https://app.hyperliquid.xyz/assets/config-CT9wEMEB.js */
+:root {
+  --radius: 4px;
+  --selected-bg: var(--surface); --selected-text: var(--bright);
+  --menu-shadow: 0 8px 24px #0004;
+  --bg: #0f1a1e; --panel: #0f1a1f; --surface: #273035; --line: #273035; --gutter: #18252b;
+  --text: #c8d2d4; --bright: #e5edec; --dim: #9aa3a4; --faint: #9aa3a4;
+  --buy: #50d2c1; --sell: #ed7088; --accent: #50d2c1; --warn: #f3c96b;
+  --buy-text: var(--buy); --sell-text: var(--sell); --warn-text: var(--warn);
+  --chart-up: #26a69a; --chart-down: #ef5350; --chart-axis: #b2b5be;
+  --vol-up: #22ab9480; --vol-down: #f7525f80;
+  --sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: var(--sans);
+  --fs: 14px;
+  --ctl: calc(var(--fs) * 2.75);
+  color-scheme: dark;
+}
+:root:not([data-theme]), :root[data-theme='hyperliquid'] {
+  --bright: #f0f7f6; --accent: #76ead7;
+  --buy-text: #84eddd; --sell-text: #ffa3b5;
+}
+:root[data-theme='getliq'] {
+  --bg: #111214; --panel: #161719; --surface: #1f2124; --line: #2b2d31; --gutter: #1d1e21;
+  --text: #aaadb3; --bright: #eef0f4; --dim: #82858b; --faint: #65686e;
+  --buy: #2f978c; --sell: #d65f5b; --accent: #68e0cd; --warn: #c49a62;
+  --buy-text: #70ddc8; --sell-text: #ff918c;
+}
+:root[data-theme='paper'] {
+  --bg: #e6e1d6; --panel: #eeeae1; --surface: #dcd6c9; --line: #c3bbac; --gutter: #ddd7cb;
+  --text: #34332f; --bright: #171713; --dim: #5c584d; --faint: #666052;
+  --buy: #06705c; --sell: #ad2e44; --accent: #06705c; --warn: #936000;
+  --buy-text: #055c4c; --sell-text: #962537; --warn-text: #7a5000;
+  color-scheme: light;
+}
+:root[data-theme='bloomberg'] {
+  --bg: #000000; --panel: #090909; --surface: #211a10; --line: #49351c; --gutter: #171109;
+  --text: #ffc56e; --bright: #ffe2ae; --dim: #d6aa70; --faint: #ba986b;
+  --buy: #6fdb91; --sell: #ff7373; --accent: #ff9f1a; --warn: #ffd34d;
+  --sans: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --mono: var(--sans);
+}
+:root[data-theme='getliq'],:root[data-theme='paper'], :root[data-theme='bloomberg'] {
+  --chart-up: var(--buy); --chart-down: var(--sell); --chart-axis: var(--dim);
+  --vol-up: initial; --vol-down: initial;
+}
+* { box-sizing: border-box; }
+/* Chromium and Safari take the pseudo-elements (and ignore them once the standard properties are set); Firefox takes the standard ones. */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--dim) 40%, transparent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--dim) 40%, transparent) transparent; } }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs)/1.4 var(--sans); font-variant-numeric: tabular-nums; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: var(--surface); border: 0; border-radius: var(--radius); padding: 4px 8px; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px; min-width: 0; }
+select { appearance: none; padding-right: 26px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%239aa3a4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; background-size: 12px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-tab { min-height: 24px; background: none; border: 0; border-radius: var(--radius); color: var(--dim); white-space: nowrap; }
+.ui-tab:hover:not(:disabled) { color: var(--selected-text); }
+.ui-tab:is(.on, [aria-pressed='true'], [aria-selected='true']) { background: var(--selected-bg); color: var(--selected-text); }
+.ui-tabs > .ui-tab { border-radius: 0; }
+.ui-tabs > .ui-tab:is(.on, [aria-pressed='true'], [aria-selected='true']) { background: none; box-shadow: inset 0 -1px 0 var(--accent); }
+.ui-menu { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--menu-shadow); }
+.ui-menu:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-field { border: 1px solid var(--surface); border-radius: var(--radius); }
+.ui-field:focus-within { border-color: var(--accent); }
+.ui-field:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+.card > h4 { margin: 0; color: var(--bright); font-size: var(--fs); font-weight: 600; }
+.callout { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+.buy { color: var(--buy-text); } .sell { color: var(--sell-text); } .dim { color: var(--dim); }
+table { width: 100%; border-collapse: collapse; }
+th { color: var(--dim); font-weight: 400; text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--gutter); }
+td { padding: 3px 8px; white-space: nowrap; }
+@media (max-width: 900px) {
+  :root { --ctl: max(40px, calc(var(--fs) * 2.75)); }
+  .ui-tab { min-height: 36px; }
+  input, select, textarea { font-size: max(16px, 1em); }
+  button:not([data-testid='book-ask'], [data-testid='book-bid']), select { min-height: 36px; min-width: 36px; }
+}
+@keyframes arm { from, to { pointer-events: none; } }
+@media (max-width: 900px), (pointer: coarse) and (max-height: 500px) {
+  /* The attribute pair outweighs a scoped .modal (0,2,0); [data-sheet] alone would not. */
+  html [role='dialog'][data-sheet] {
+    --clear: max(var(--kb, 0px), env(safe-area-inset-bottom));
+    top: auto; right: max(8px, env(safe-area-inset-right)); bottom: calc(8px + var(--clear)); left: max(8px, env(safe-area-inset-left));
+    width: auto; max-width: 560px; max-height: min(90dvh, calc(100dvh - 16px - var(--clear))); margin-inline: auto; padding: 16px 12px 12px;
+    transform: none; overflow-y: auto; scroll-padding-bottom: 80px;
+  }
+  /* Sticky insets count from inside the card's padding; the spread paints the row's opaque band over that padding. */
+  html [data-sheet] > :is(.actions, .confirm) { position: sticky; bottom: 0; z-index: 1; order: 1; flex: none; box-shadow: 0 0 0 12px var(--panel); }
+  html [data-sheet] > .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; background: var(--panel); }
+  html [data-sheet] > .actions > button, html [data-sheet] > .confirm { min-height: 44px; }
+  html [data-sheet] > .confirm:disabled { opacity: 1; background: color-mix(in srgb, var(--accent) 45%, var(--panel)); color: color-mix(in srgb, var(--bg) 45%, var(--panel)); }
+  /* The tap that opens a dialog lands where Confirm now sits: the second tap of a double tap must miss it. */
+  html [data-sheet] > .actions > .go, html [data-sheet] > .confirm { animation: arm 300ms; }
+}

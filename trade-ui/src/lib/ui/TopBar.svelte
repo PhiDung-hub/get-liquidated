@@ -1,0 +1,265 @@
+<script lang="ts">
+  import { tick, untrack } from 'svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { market, selectCoin } from '$lib/market/market.svelte';
+  import { isSpot, meta, parseCtx, parseSpotCtx, quoteOf, type Ctx } from '$lib/market/meta.svelte';
+  import { safe } from '$lib/market/watch.svelte';
+  import { removeQuick, topChips } from '$lib/market/views.svelte';
+  import { socket } from '$lib/transport/ws.svelte';
+  import { settings, persist, DEFAULTS } from '$lib/settings/settings.svelte';
+  import ThemePicker from './ThemePicker.svelte';
+  import { resumeWallet, session, walletReady } from '$lib/session/session.svelte';
+  import { fmtCompact, fmtNum, fmtPct, fmtPx, pxDecimals } from '$lib/util/format';
+  import { openSettings, ui } from './state.svelte';
+  import { load, save } from '$lib/util/storage';
+  import Coin from './Coin.svelte';
+  import Connection from './Connection.svelte';
+  import AccountSwitch from './AccountSwitch.svelte';
+  import { inZen } from './zen';
+
+  let suggestMigration = $state(false);
+  let migrationChecked = false;
+  $effect(() => {
+    if (!session.master || session.linked || migrationChecked) return;
+    migrationChecked = true;
+    const defaultsUnchanged = untrack(() => JSON.stringify($state.snapshot(settings)) === JSON.stringify(DEFAULTS));
+    if (defaultsUnchanged && !load('trade-ui:migration-suggested', false)) suggestMigration = true;
+  });
+  function dismissMigration() {
+    suggestMigration = false;
+    save('trade-ui:migration-suggested', true);
+  }
+  let now = $state(Date.now());
+
+  const ctx = $derived(market.ctx ?? meta.ctxs.get(market.coin) ?? null);
+  const szDec = $derived(meta.byName.get(market.coin)?.szDecimals ?? 0);
+  // Spot has no oracle, open interest, funding or leverage; its volume is in the quote token.
+  const spot = $derived(isSpot(market.coin));
+  const quote = $derived(quoteOf(market.coin));
+  const change = $derived(ctx ? (ctx.markPx - ctx.prevDayPx) / ctx.prevDayPx : NaN);
+  const toFunding = $derived(3_600_000 - (now % 3_600_000));
+  const fundingSeconds = $derived(Math.ceil(toFunding / 1000));
+  const countdown = $derived(`${String(Math.floor(fundingSeconds / 60)).padStart(2, '0')}:${String(fundingSeconds % 60).padStart(2, '0')}`);
+  const fundingHelp = 'Current estimated hourly funding rate. Next Hyperliquid settlement is at the next UTC hour. Positive rates: longs pay shorts; negative rates: shorts pay longs. The rate may change before settlement.';
+  const phone = new MediaQuery('max-width: 900px');
+  const diff = $derived(ctx ? ctx.markPx - ctx.prevDayPx : NaN);
+  let statsOpen = $state(false);
+  // The funding countdown shows on a phone only with the stats open.
+  $effect(() => {
+    if (phone.current && !statsOpen) return;
+    now = Date.now();
+    const t = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(t);
+  });
+  function toAccountTab() {
+    settings.display.phoneTab = 'account';
+    persist();
+  }
+  // An opened foldable (a phone layout at 600 px or more) has room for each chip's price and 24h, so it shows every chip, scrolling.
+  const fold = new MediaQuery('min-width: 600px');
+  const info = $derived(!phone.current || fold.current);
+  const favs = $derived(topChips().slice(0, info ? undefined : 3));
+  const live = $state<Record<string, Ctx>>({});
+  // Keyed by the names, so a meta publish that keeps the same chips does not resubscribe them.
+  const favKey = $derived(favs.join(','));
+  // Chip prices show above the 1380px breakpoint below and on an opened foldable, and zen hides the bar; elsewhere chip() falls back to meta.ctxs.
+  const wide = new MediaQuery('min-width: 1381px');
+  $effect(() => {
+    const offs = (favKey && (wide.current || (phone.current && fold.current)) && !inZen() ? favKey.split(',') : []).map((coin) => socket.subscribe({ type: 'activeAssetCtx', coin }, safe('favourite ctx', (d) => (live[coin] = isSpot(coin) ? parseSpotCtx(d.ctx) : parseCtx(d.ctx)))));
+    return () => offs.forEach((off) => off());
+  });
+  function chip(coin: string) {
+    const c = live[coin] ?? meta.ctxs.get(coin);
+    return c && { px: fmtPx(c.markPx, meta.byName.get(coin)?.szDecimals, isSpot(coin)), chg: (c.markPx - c.prevDayPx) / c.prevDayPx };
+  }
+  $effect(() => {
+    if (walletReady()) untrack(resumeWallet);
+  });
+  /** A keyboard removal hands focus to the chip that takes its place, so the next Delete keeps going. */
+  async function unchip(coin: string, refocus: boolean) {
+    const i = favs.indexOf(coin);
+    removeQuick(coin);
+    if (!refocus) return;
+    await tick();
+    const chips = document.querySelectorAll<HTMLElement>('[data-testid="fav-chip"]');
+    (chips[Math.min(i, chips.length - 1)] ?? document.querySelector<HTMLElement>('[data-testid="quick-open"]'))?.focus();
+  }
+  /** What CSS cannot decide: chip prices show only while every chip fits with them, a chip wrapped onto the clipped row is inert, and the account label, then its short address, go before the market name is cut. */
+  function fit(header: HTMLElement) {
+    const run = () => {
+      const nav = header.querySelector<HTMLElement>('.chips');
+      header.classList.remove('nolabel', 'noaddr');
+      const coin = header.querySelector<HTMLElement>('.coin')!;
+      const cut = () => coin.scrollWidth > coin.clientWidth;
+      if (cut()) header.classList.add('nolabel');
+      if (cut()) header.classList.add('noaddr');
+      if (!nav) return;
+      nav.classList.remove('bare');
+      nav.style.maxWidth = '';
+      const box = nav.getBoundingClientRect();
+      const chips = [...nav.children] as HTMLElement[];
+      const shown = (c: HTMLElement) => c.getBoundingClientRect().bottom <= box.bottom + 0.5;
+      if (!chips.every(shown)) nav.classList.add('bare');
+      for (const c of chips) c.inert = !shown(c);
+      // The room a dropped chip leaves goes to the right controls' margin, not a gap inside the strip.
+      nav.style.maxWidth = `${(chips.filter(shown).at(-1)?.getBoundingClientRect().right ?? box.left) - box.left}px`;
+    };
+    const resized = new ResizeObserver(run);
+    const changed = new MutationObserver(run);
+    resized.observe(header);
+    changed.observe(header, { subtree: true, childList: true, characterData: true });
+    return () => (resized.disconnect(), changed.disconnect());
+  }
+</script>
+
+{#snippet chipStrip()}
+{#if favs.length}
+  <nav class="chips" data-testid="fav-chips" data-superstar={settings.display.superstar} aria-label="Quick-switch markets">
+    {#each favs as coin (coin)}
+      {@const c = chip(coin)}
+      <span class="slot">
+        <button class="chip" data-testid="fav-chip" data-coin={coin} aria-current={coin === market.coin} title={phone.current ? undefined : 'Right-click, middle-click or Delete removes it'} onclick={(e) => (e.currentTarget.blur(), selectCoin(coin))}
+          onmousedown={(e) => e.button === 1 && e.preventDefault()} onauxclick={(e) => e.button === 1 && removeQuick(coin)}
+          oncontextmenu={(e) => !phone.current && (e.preventDefault(), removeQuick(coin))} onkeydown={(e) => (e.key === 'Delete' || e.key === 'Backspace') && (e.stopPropagation(), unchip(coin, true))}>
+          <span class="coin"><Coin {coin} /></span>
+          <!-- The current market's price and 24h are in the header. -->
+          {#if info && coin !== market.coin}
+            <span class="px num">{c?.px ?? '—'}</span>
+            <span class="chg num" class:buy={c && c.chg >= 0} class:sell={c && c.chg < 0}>{c ? fmtPct(c.chg) : '—'}</span>
+          {/if}
+        </button>
+        {#if !phone.current}<button class="unchip" data-testid="fav-chip-remove" aria-label="Remove {coin} from the top bar" onclick={(e) => unchip(coin, e.detail === 0)}>✕</button>{/if}
+      </span>
+    {/each}
+  </nav>
+{/if}
+{#if !phone.current}{@render quickOpen()}{/if}
+{/snippet}
+{#snippet quickOpen()}
+<button class="quick" data-testid="quick-open" aria-label="Edit quick-switch markets" title="Quick-switch markets: add, remove, reorder" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'quick'))}>★★</button>
+{/snippet}
+{#snippet more()}
+<div class="stat"><span class="dim">24h Vol</span><span class="num" data-testid="day-volume">{ctx ? (quote === 'USDC' ? `$${fmtCompact(ctx.dayNtlVlm)}` : `${fmtCompact(ctx.dayNtlVlm)} ${quote}`) : '—'}</span></div>
+{#if !spot}
+<div class="stat"><span class="dim">OI</span><span class="num" data-testid="open-interest">{ctx?.openInterest != null ? `$${fmtCompact(ctx.openInterest * ctx.markPx)}` : '—'}</span></div>
+{/if}
+{/snippet}
+{#snippet fundingStat()}
+{#if !spot}
+<div class="stat" title={fundingHelp}><span class="dim">Funding</span><span class="funding-values"><span class="num" data-testid="funding" class:buy={(ctx?.funding ?? 0) >= 0} class:sell={(ctx?.funding ?? 0) < 0}>{ctx?.funding != null ? `${fmtNum(ctx.funding * 100, 4)}%` : '—'}</span><span class="dim">in</span><time class="num" data-testid="funding-countdown" datetime={`PT${fundingSeconds}S`} aria-label={`${countdown} until next funding settlement`}>{countdown}</time></span></div>
+{/if}
+{/snippet}
+
+{#if phone.current}
+  <header class="bar">
+    <img class="logo" src="/icon-192.png" alt="" width="24" height="24" />
+    {@render chipStrip()}
+    <span class="spacer"></span>
+    {#if session.master}<AccountSwitch compact />{:else}<button class="connect" data-testid="top-connect" onclick={(e) => (e.currentTarget.blur(), toAccountTab())}>Connect</button>{/if}
+    <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
+    <span class="sock" data-testid="top-socket" data-state={socket.state} title="socket {socket.state}"><i class:ok={socket.state === 'open'}></i></span>
+  </header>
+  <section class="ticker" data-testid="ticker">
+    <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
+      <span class="name"><Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾</span>
+      {#if meta.byName.get(market.coin) && !spot}<span class="lev">{meta.byName.get(market.coin)?.maxLeverage}x</span>{/if}
+    </button>
+    <div class="price">
+      <span class="num big" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>
+      <span class="num day" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{#if ctx}<span class="abs">{diff >= 0 ? '+' : '-'}{fmtNum(Math.abs(diff), pxDecimals(ctx.markPx, szDec, spot))} / </span>{fmtPct(change)}{:else}—{/if}</span>
+    </div>
+    {@render quickOpen()}
+    <button class="more" data-testid="ticker-more" aria-expanded={statsOpen} aria-label={statsOpen ? 'Hide market stats' : 'Show market stats'} onclick={(e) => (e.currentTarget.blur(), (statsOpen = !statsOpen))}>{statsOpen ? '▴' : '▾'}</button>
+    {#if statsOpen}
+      <div class="stats" data-testid="ticker-stats">
+        {#if !spot}<div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div>{/if}
+        {@render more()}
+        {@render fundingStat()}
+      </div>
+    {/if}
+  </section>
+{:else}
+  <header class="desk" {@attach fit}>
+    <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
+      <Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾
+    </button>
+    {@render chipStrip()}
+    <div class="stat"><span class="dim">Mark</span><span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></div>
+    {#if !spot}<div class="fold oracle"><div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div></div>{/if}
+    <div class="stat"><span class="dim">24h</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{fmtPct(change)}</span></div>
+    {@render fundingStat()}
+    <div class="fold strip">{@render more()}</div>
+    <div class="right">
+      <Connection />
+      <ThemePicker value={settings.display.theme} onchange={id => { settings.display.theme = id; persist(); }} />
+      <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
+    </div>
+  </header>
+{/if}
+{#if suggestMigration}
+  <aside class="migration-suggestion" data-testid="migration-suggestion" aria-label="Hyperliquid settings migration">
+    <span>Coming from Hyperliquid?{#if !phone.current} Your settings are still at their defaults. Move your markets, chart and preferences with your local AI.{/if}</span>
+    <button onclick={() => { dismissMigration(); ui.overlay = 'migration'; }}>Migration guide</button>
+    <button aria-label="Dismiss migration suggestion" onclick={dismissMigration}>×</button>
+  </aside>
+{/if}
+
+<style>
+  .migration-suggestion { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .migration-suggestion > span { flex: 1 1 240px; }
+  @media (max-width: 900px) { .migration-suggestion { flex-wrap: nowrap; padding: 4px 12px; } .migration-suggestion > span { flex: 1 1 auto; } }
+  header { display: flex; align-items: center; padding: calc(6px + env(safe-area-inset-top)) 12px 6px; border-bottom: 1px solid var(--line); overflow: clip; white-space: nowrap; }
+  /* Mark, 24h, funding and the right controls never give way. The folds take only the room left, oracle first, then the strip, then the chips; each drops whole items that do not fit onto a clipped second line. Then fit() drops the account label, then its short address, then the market name is cut. */
+  .desk > .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .desk > .stat, .fold .stat { margin-left: 20px; }
+  .fold, .desk > .chips { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
+  .fold::before, .desk > .chips::before { content: ''; }
+  .fold { display: flex; font-size: max(8px, calc(var(--fs) * 0.917)); height: 2lh; }
+  .oracle { flex-grow: 1000000; }
+  .strip { flex-grow: 1000; }
+  .desk > .chips { margin-left: 8px; height: calc(var(--fs) * 1.167 * 1.4 + 16px); overflow-clip-margin: 4px; }
+  .chips:global(.bare) .num, .desk:global(.nolabel) :global(.wallet .label), .desk:global(.noaddr) :global(.wallet .addr) { display: none; }
+  .coin { font-weight: 600; font-size: calc(var(--fs) * 1.167); background: none; padding: 4px 0; color: var(--bright); }
+  .stat { display: flex; flex-direction: column; font-size: max(8px, calc(var(--fs) * 0.917)); }
+  .funding-values { display: flex; align-items: baseline; gap: 5px; }
+  .funding-values time { color: var(--bright); font-variant-numeric: tabular-nums; }
+  .chips { display: flex; gap: 2px; font-size: max(8px, calc(var(--fs) * 0.917)); }
+  .chip { display: flex; gap: 4px; align-items: baseline; padding: 4px 6px; background: none; color: var(--dim); }
+  .chip[aria-current='true'] { background: var(--surface); color: var(--bright); }
+  .chip .coin { font-weight: 600; }
+  .slot { position: relative; display: flex; }
+  .slot:hover, .slot:focus-within { z-index: 1; }
+  .unchip { display: none; position: absolute; top: -4px; right: -2px; width: 16px; height: 16px; padding: 0; line-height: 14px; text-align: center; font-size: max(8px, calc(var(--fs) * 0.75)); background: var(--panel); color: var(--dim); border: 1px solid var(--line); border-radius: var(--radius); }
+  .slot:hover .unchip, .slot:focus-within .unchip { display: block; }
+  .unchip:hover { color: var(--sell); }
+  .quick { background: none; color: var(--faint); padding: 4px; font-size: max(8px, calc(var(--fs) * 0.833)); margin-left: 6px; }
+  .quick:hover { color: var(--warn); }
+  .right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: auto; padding-left: 20px; }
+  @media (min-width: 901px) and (max-width: 1380px) {
+    .chip .num { display: none; }
+  }
+  .bar { gap: 6px; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; overflow: visible; }
+  .bar > :not(.chips, .spacer) { flex-shrink: 0; }
+  .bar .logo { border-radius: var(--radius); }
+  .bar .chips { flex: 0 1 auto; flex-wrap: wrap; row-gap: 50vh; min-width: 0; height: max(36px, calc(var(--fs) * 1.4 + 8px)); margin-left: 0; overflow: clip; }
+  .bar [data-testid='settings-button'] { background: none; border: 1px solid var(--line); border-radius: var(--radius); font-size: calc(var(--fs) * 1.333); }
+  .spacer { flex: 1 0 0; }
+  .price { container-type: inline-size; }
+  .price .day { white-space: nowrap; }
+  @container (max-width: 9em) { .price .abs { display: none; } }
+  .bar .chip[aria-current='true'] { background: none; }
+  .bar .chip[aria-current='true'] .coin { color: var(--accent); }
+  .connect { background: var(--accent); color: var(--bg); font-weight: 600; padding: 6px 14px; border-radius: var(--radius); }
+  .ticker { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 2px 14px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  .ticker .coin { display: flex; flex-direction: column; align-items: flex-start; padding: 0; font-size: calc(var(--fs) * 1.5); }
+  .ticker .lev { font-size: max(8px, calc(var(--fs) * 0.917)); font-weight: 400; color: var(--accent); }
+  .price { display: flex; flex-direction: column; min-width: 0; font-size: max(8px, calc(var(--fs) * 0.917)); }
+  .price .big { font-size: calc(var(--fs) * 1.5); color: var(--bright); }
+  .ticker .quick { margin: 0 -10px 0 0; min-width: 36px; min-height: 36px; padding: 0 2px; border: 1px solid var(--line); border-radius: var(--radius); letter-spacing: -1px; }
+  .more { background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); }
+  .stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; padding: 6px 0 2px; }
+  .stats .stat { line-height: 1.3; }
+  .sock { display: flex; align-items: center; padding: 0 2px; }
+  .sock i { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius); background: var(--sell); }
+  .sock i.ok { background: var(--buy); }
+</style>

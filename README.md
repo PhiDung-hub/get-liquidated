@@ -14,7 +14,8 @@ Each release is the same commit of the private monorepo, exported here. Building
 
 ```bash
 git clone https://github.com/PhiDung-hub/get-liquidated && cd get-liquidated
-git checkout v1.2.28                 # the release the site serves (see https://get.hyperliqui.date/_app/version.json)
+V=$(curl -s https://get.hyperliqui.date/_app/version.json | sed -E 's/.*"version":"([0-9.]+).*/\1/')
+git checkout "v$V"                   # the release the site serves now
 pnpm install --frozen-lockfile && pnpm build
 pnpm verify https://get.hyperliqui.date trade-ui/build
 ```
@@ -24,7 +25,8 @@ pnpm verify https://get.hyperliqui.date trade-ui/build
 **2. Check GitHub's signed record (quick).** CI builds every release, publishes `manifest.json` (the SHA-256 of every file) with a [build attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds), and compares the live site with its build after each release and every 6 hours ([workflow](.github/workflows/verify.yml)):
 
 ```bash
-gh release download v1.2.28 --repo PhiDung-hub/get-liquidated --pattern manifest.json
+V=$(curl -s https://get.hyperliqui.date/_app/version.json | sed -E 's/.*"version":"([0-9.]+).*/\1/')
+gh release download "v$V" --repo PhiDung-hub/get-liquidated --pattern manifest.json
 gh attestation verify manifest.json --repo PhiDung-hub/get-liquidated
 node trade-ui/scripts/verify.mjs https://get.hyperliqui.date manifest.json
 ```

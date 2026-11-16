@@ -1,6 +1,7 @@
 <script lang="ts">
   import { market } from '$lib/market/market.svelte';
   import { asset, isolatedOnly } from '$lib/market/meta.svelte';
+  import { cutDecimals } from '$lib/signing/wire';
   import { assetData } from '$lib/account/assetData.svelte';
   import { setLeverage } from '$lib/orders/execute';
   import { ui } from '$lib/ui/state.svelte';
@@ -27,12 +28,12 @@
   // A press on selected page text starts a native drag of it, which cancels the thumb's drag.
   const unselect = () => getSelection()?.removeAllRanges();
   function typed(e: Event & { currentTarget: HTMLInputElement }) {
-    // Leverage is whole: stripping the "." of a typed 2.5 would set 25×, so other text waits for the change event to reset it.
-    const digits = e.currentTarget.value.trim();
-    if (!/^\d+$/.test(digits)) return;
+    // Leverage is whole: the cut keeps the "." of a typed 2.5 and drops the 5, so it never reads as 25×.
+    const digits = (e.currentTarget.value = cutDecimals(e.currentTarget.value, 0));
+    if (!(Number(digits) > 0)) return;
     value = Math.min(Math.max(Number(digits), 1), a.maxLeverage);
     // An unchanged clamped value would not re-render, so the out-of-range text is replaced here.
-    e.currentTarget.value = String(value);
+    if (value !== Number(digits)) e.currentTarget.value = String(value);
   }
 
   async function confirm(e: MouseEvent) {

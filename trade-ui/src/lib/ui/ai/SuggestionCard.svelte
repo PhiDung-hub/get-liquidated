@@ -3,6 +3,7 @@
   import { act, type Suggestion } from '$lib/agent/agent.svelte';
   import { selectCoin } from '$lib/market/market.svelte';
   import { kindOf, listed, listState, meta, symOf } from '$lib/market/meta.svelte';
+  import { cutPx, roundSz } from '$lib/signing/wire';
   import { persist, settings } from '$lib/settings/settings.svelte';
   import { ticket } from '$lib/orders/ticket.svelte';
   import { fmtSz } from '$lib/util/format';
@@ -26,7 +27,9 @@
     // The order panel clears typed prices on a coin switch; that runs on this tick, so the ticket is filled after it.
     await tick();
     const tpsl = s.tp !== null || s.sl !== null;
-    Object.assign(ticket, { kind: s.kind, isBuy: s.side === 'buy', px: text(s.px), size: s.size, unit: s.unit, reduceOnly: false, tpsl, tp: text(s.tp), sl: text(s.sl) });
+    const a = meta.byName.get(s.coin), px = (n: number | null) => cutPx(text(n), a);
+    const size = s.unit === 'coin' ? roundSz(s.size, a?.szDecimals ?? 8) : Math.floor(s.size * 100) / 100;
+    Object.assign(ticket, { kind: s.kind, isBuy: s.side === 'buy', px: px(s.px), size, unit: s.unit, reduceOnly: false, tpsl, tp: px(s.tp), sl: px(s.sl) });
     if (s.kind === 'limit') ticket.tif = 'Gtc';
     settings.panel.sizeUnit = s.unit;
     persist();

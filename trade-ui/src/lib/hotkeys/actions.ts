@@ -1,5 +1,5 @@
 import { market, selectCoin } from '$lib/market/market.svelte';
-import { isSpot, listed } from '$lib/market/meta.svelte';
+import { isSpot, listed, meta } from '$lib/market/meta.svelte';
 import { bbo } from '$lib/market/book.svelte';
 import { positionOf } from '$lib/account/inventory.svelte';
 import { lastGroup } from '$lib/exchange/ledger.svelte';
@@ -127,8 +127,8 @@ export const HANDLERS: Record<ActionId, (held?: number) => unknown> = {
   prevFav: () => cycleFavourite(-1),
   nextFav: () => cycleFavourite(1),
   starFav: starFavourite,
-  sizeDown: () => nudgeSize(-1),
-  sizeUp: () => nudgeSize(1),
+  sizeDown: () => nudgeSize(-1, meta.byName.get(coin())?.szDecimals ?? 8),
+  sizeUp: () => nudgeSize(1, meta.byName.get(coin())?.szDecimals ?? 8),
   focusSize,
   reduceToggle: () => {
     if (isSpot(coin())) throw new Error(REDUCE_SPOT);

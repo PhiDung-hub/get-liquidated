@@ -43,7 +43,7 @@
 
   const finite = (text: string) => ((v) => (Number.isFinite(v) ? v : NaN))(Number(text));
   const sz = $derived(pct === 100 ? held : roundSz((held * pct) / 100, d));
-  const amount = $derived(!(mark > 0) ? NaN : Number(finite(retraceText).toFixed(unit === 'pct' ? 2 : priceDecimals(mark, t))));
+  const amount = $derived(!(mark > 0) ? NaN : finite(cutDecimals(retraceText, unit === 'pct' ? 2 : priceDecimals(mark, t))));
   const retracement = $derived<Retracement>(unit === 'pct' ? { pct: amount } : { px: amount });
   const typedActivation = $derived(finite(activationText));
   const activation = $derived(!activationText.trim() ? null : typedActivation > 0 ? roundPx(typedActivation, t, !long) : NaN);

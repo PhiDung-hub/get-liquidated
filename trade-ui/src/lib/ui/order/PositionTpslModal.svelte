@@ -11,7 +11,7 @@
   import { net } from '$lib/transport/network';
   import { closing } from '$lib/orders/ticket.svelte';
   import { optPx } from '$lib/orders/tpsl';
-  import { cutDecimals, cutPx, cutSz, roundPx, roundSz, tickSize } from '$lib/signing/wire';
+  import { cutDecimals, cutPx, cutSz, floatToWire, roundPx, roundSz, tickSize } from '$lib/signing/wire';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { ui } from '../state.svelte';
   import Coin from '../Coin.svelte';
@@ -57,12 +57,16 @@
     const value = unit === 'price' ? optPx(text, kind) : text.trim() ? Number(text) : null;
     if (value !== null && !Number.isFinite(value)) throw new Error(`Invalid ${kind} amount.`);
     if (value === null || unit === 'price') return value;
+    const k = kept[kind];
+    if (k && k.unit === unit && k.text === text && (unit === 'percent' || k.quantity === exitQuantity(kind))) return k.price;
     if (!(entry && entry > 0 && quantity > 0 && leverage > 0)) throw new Error('Position basis unavailable.');
     const move = unit === 'percent' ? entry * value / (100 * leverage) : value / exitQuantity(kind);
     return entry + (long ? 1 : -1) * (kind === 'TP' ? 1 : -1) * move;
   }
   /** A trigger price follows the tick rule; ROE % and PnL keep 2 places and may be negative (a stop past entry). */
   const typed = (unit: Unit) => (v: string) => (unit === 'price' ? cutPx(v, t) : cutDecimals(v, 2, true));
+  // A 2-place ROE % or PnL cannot hold every tick, so a converted value remembers its exact price until it is retyped.
+  const kept: Record<'TP' | 'SL', { text: string; unit: Unit; quantity: number; price: number } | null> = { TP: null, SL: null };
   function changeUnit(kind: 'TP' | 'SL', unit: Unit) {
     const oldText = kind === 'TP' ? tp : sl;
     let text = oldText;
@@ -71,7 +75,8 @@
       if (price !== null && entry && entry > 0) {
         const move = (price - entry) * (long ? 1 : -1) * (kind === 'TP' ? 1 : -1);
         const value = unit === 'price' ? price : unit === 'percent' ? move / entry * leverage * 100 : move * exitQuantity(kind);
-        text = unit === 'price' && !(value > 0) ? '' : typed(unit)(String(Number(value.toPrecision(12))));
+        text = unit === 'price' ? (value > 0 ? floatToWire(roundPx(value, t, !long)) : '') : String(Number(value.toFixed(2)));
+        kept[kind] = unit === 'price' ? null : { text, unit, quantity: exitQuantity(kind), price };
       }
     } catch { text = ''; }
     units[kind] = unit;

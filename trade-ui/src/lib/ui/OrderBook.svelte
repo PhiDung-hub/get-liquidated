@@ -115,8 +115,8 @@
 <div class="ob" class:totals bind:clientWidth={width} data-testid="book" data-time={book.time} data-coin={market.coin} data-unit={sizeUnit} data-rows={w}>
   <div class="head">
     <div class="bins">
-      <Menu value={settings.book.sizeUnit} options={sizeOptions} text={quoteSize ? quoteOf(market.coin) : 'Native'} onpick={chooseSizeUnit} testid="book-unit" ariaLabel="Book size unit" dropdown />
-      {#if active}<Menu value={String(active.step)} options={menu} onpick={chooseBin} testid="book-bins" ariaLabel="Book bins" />{/if}
+      {#if active}<Menu value={String(active.step)} options={menu} onpick={chooseBin} testid="book-bins" ariaLabel="Book bins" align="left" />{:else}<span></span>{/if}
+      <Menu value={settings.book.sizeUnit} options={sizeOptions} onpick={chooseSizeUnit} testid="book-unit" ariaLabel="Book size unit" dropdown />
     </div>
     <div class="cols"><span>Price</span><span>Size{unit}</span>{#if full}<span>Total{unit}</span>{/if}</div>
   </div>

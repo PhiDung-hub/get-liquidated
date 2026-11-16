@@ -11,17 +11,21 @@
 
   // A number still being typed ("-", "." or "1.") stays on screen while it reads as the value the parent kept; anything else the parent changed replaces it.
   const num = (t: string) => Number(/^\s*-?\.?\s*$/.test(t) ? 0 : t);
-  const same = (typed: string, v: string) => typed === v || (/^\s*-?\d*\.?\d*\s*$/.test(typed) && num(typed) === num(v));
+  const same = (typed: string, v: string) => typed === v || (!typed.trim() === !v.trim() && /^\s*-?\d*\.?\d*\s*$/.test(typed) && num(typed) === num(v));
   let text = $state(untrack(() => value));
   $effect.pre(() => {
     const v = value;
     untrack(() => same(text, v) || (text = v));
   });
   function typed(e: Event & { currentTarget: HTMLInputElement }) {
-    const t = cut(e.currentTarget.value);
+    const el = e.currentTarget;
+    const caret = cut(el.value.slice(0, el.selectionStart ?? el.value.length)).length;
+    const t = cut(el.value);
     value = t;
     text = same(t, value) ? t : value;
-    if (e.currentTarget.value !== text) e.currentTarget.value = text;
+    if (el.value === text) return;
+    el.value = text;
+    if (text === t) el.setSelectionRange(caret, caret);
   }
 
   let tight = $state(false);

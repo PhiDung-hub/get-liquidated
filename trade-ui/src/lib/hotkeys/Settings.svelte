@@ -136,6 +136,10 @@
     const s = settings.hotkeySizes[t];
     return s.unit === 'coin' ? cutSz(v, meta.byName.get(s.coin ?? '')?.szDecimals) : cutDecimals(v, 2);
   };
+  // The box keeps its own text while it reads as the stored number, so "0." or "." is not rewritten mid-edit.
+  let sizeText = $state<Partial<Record<HotkeyType, string>>>({});
+  const sizeShown = (t: HotkeyType) => ((s, v) => (s !== undefined && (Number(s) || 0) === v ? s : v))(sizeText[t], settings.hotkeySizes[t].value);
+  const typeSize = (t: HotkeyType, el: HTMLInputElement) => (settings.hotkeySizes[t].value = Number((el.value = sizeText[t] = typeHotkeySize(t, el.value))) || 0);
   const modeOf = (t: HotkeyType) => {
     const s = settings.hotkeySizes[t];
     return s.unit === 'pct' ? `pct-${s.basis}` : s.unit === 'coin' ? `coin:${s.coin}` : s.unit;
@@ -193,7 +197,7 @@
             <div class="hk" data-testid="hotkey-size-{r.t}">
               <span class="keys"><span class="buy">{buy}</span> / <span class="sell">{sell}</span></span>
               <span>{r.label}</span>
-              <input inputmode="decimal" autocomplete="off" aria-label="{r.label} size" value={settings.hotkeySizes[r.t].value} oninput={(e) => (settings.hotkeySizes[r.t].value = Number((e.currentTarget.value = typeHotkeySize(r.t, e.currentTarget.value))))} />
+              <input inputmode="decimal" autocomplete="off" aria-label="{r.label} size" value={sizeShown(r.t)} oninput={(e) => typeSize(r.t, e.currentTarget)} />
               <select aria-label="{r.label} size unit" value={modeOf(r.t)} onchange={(e) => setMode(r.t, e.currentTarget.value)}>
                 <option value="usd">USD</option>
                 {#each coinsOf(r.t) as c (c)}<option value="coin:{c}">{symOf(c)}</option>{/each}

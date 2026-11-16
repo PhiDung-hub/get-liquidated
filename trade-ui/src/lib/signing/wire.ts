@@ -36,12 +36,16 @@ export function roundPx(px: number, t: Tick, isBuy: boolean): number {
 /**
  * Typed text kept to a number Hyperliquid can take, as it is typed: digits and one "." (a "," from a comma keypad reads as
  * "."), at most `decimals` places, and a leading "-" only when `signed`. Nothing else reaches the box.
+ * The point stays even with no places allowed: dropped, the next digit would join the whole part (2.5 → 25).
+ * Pasted text keeps its magnitude: "64,123.5" is grouped, not 64.1, and "1e5" is 100000, not 15.
  */
 export function cutDecimals(text: string, decimals: number, signed = false): string {
-  const t = text.replace(',', '.');
-  const sign = signed && t.trimStart().startsWith('-') ? '-' : '';
+  let t = text.normalize('NFKC').replace('−', '-').trim();
+  if (/^-?(\d+\.?\d*|\.\d+)e[-+]?\d+$/i.test(t) && Math.abs(Number(t)) < 1e21) t = Number(t).toFixed(12);
+  t = /^\D*[1-9]\d{0,2}(,\d{3})+(\.\d*)?\D*$/.test(t) ? t.replaceAll(',', '') : t.replace(',', '.');
+  const sign = signed && t.startsWith('-') ? '-' : '';
   const [whole, frac] = t.replace(/[^\d.]/g, '').split('.');
-  return sign + (frac !== undefined && decimals > 0 ? `${whole}.${frac.slice(0, decimals)}` : whole);
+  return sign + (frac === undefined ? whole : `${whole}.${frac.slice(0, Math.max(0, decimals))}`);
 }
 
 /** Typed price text cut to the tick rule: 5 significant figures and at most maxDecimals places; integers always pass. */
@@ -60,5 +64,5 @@ export const cutSz = (text: string, szDecimals: number | undefined) => cutDecima
 
 export function roundSz(sz: number, szDecimals: number): number {
   const f = 10 ** szDecimals;
-  return snap(Math.floor(sz * f + 1e-9) / f, szDecimals);
+  return snap(Math.floor(Number((sz * f).toPrecision(15))) / f, szDecimals);
 }

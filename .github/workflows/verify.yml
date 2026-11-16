@@ -45,6 +45,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" manifest.json build.tar.gz --verify-tag --title "$GITHUB_REF_NAME" --notes "Serves as \`$(jq -r .version manifest.json)\`. Verify: see README."
+        run: |
+          gh release create "$GITHUB_REF_NAME" manifest.json build.tar.gz --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes "Serves as \`$(jq -r .version manifest.json)\`. To check the live site against it, see the README."
       - name: Compare with the live site
         run: node trade-ui/scripts/verify.mjs https://get.hyperliqui.date trade-ui/build

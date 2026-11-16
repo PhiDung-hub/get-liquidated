@@ -3,17 +3,20 @@ import { existsSync, readFileSync } from 'node:fs';
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
-const git = (/** @type {string} */ cmd) => execSync(`git ${cmd}`, { encoding: 'utf8' }).trim();
+const git = (/** @type {string} */ cmd) => execSync(`git ${cmd}`, { encoding: 'utf8', cwd: new URL('.', import.meta.url) }).trim();
 const release = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const stamp = (/** @type {Date} */ d) => `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-// The commit's time, not the build's, so a rebuild of the same source is byte-identical (public-repo/README.md). The public
+// The last commit to touch what the bundle is built from, not HEAD or the clock: a rebuild of the same source is
+// byte-identical, and docs, tests or CI commits leave a deployed build verifiable (public-repo/README.md). The public
 // mirror has no monorepo history, so the export writes the same string to version.txt.
+const INPUTS = 'src static svelte.config.js vite.config.ts tsconfig.json package.json ../agent/src/wire.ts ../pnpm-lock.yaml';
 const pinned = new URL('./version.txt', import.meta.url);
 // SvelteKit evaluates this file more than once per build (and again in worker threads); keep one value for all of them.
 const version = (process.env.TRADE_UI_VERSION ??= (() => {
   if (existsSync(pinned)) return readFileSync(pinned, 'utf8').trim();
   try {
-    return `${release} · ${git('rev-parse --short HEAD')}${git('status --porcelain -- .') ? '-dirty' : ''} · ${stamp(new Date(git('log -1 --format=%cI')))}`;
+    const [sha, at] = git(`log -1 --format='%h %cI' -- ${INPUTS}`).split(' ');
+    return `${release} · ${sha}${git(`status --porcelain -- ${INPUTS}`) ? '-dirty' : ''} · ${stamp(new Date(at))}`;
   } catch {
     return `${release} · dev · ${stamp(new Date())}`;
   }

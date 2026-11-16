@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { agent, annotationChat, askBlocked, askNow, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers } from '$lib/agent/agent.svelte';
+  import { agent, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers, terminalSessions } from '$lib/agent/agent.svelte';
   import { settings, persist } from '$lib/settings/settings.svelte';
-  import { market } from '$lib/market/market.svelte';
   import { ui } from '$lib/ui/state.svelte';
-  import SuggestionCard from './SuggestionCard.svelte';
-  import AiTerminal from './AiTerminal.svelte';
+  import { menus } from '$lib/ui/order/Menu.svelte';
+  import AiThread from './AiThread.svelte';
   import { coach, showCoach } from './setups.svelte';
   import { CLIENTS, setupPrompt, type Client } from '$lib/agent/setupPrompt';
   import { load } from '$lib/util/storage';
@@ -27,44 +26,72 @@
     const picked = load<{ client?: unknown }>('trade-ui:ai-connect', {}).client;
     return copySetup(setupPrompt(typeof picked === 'string' && Object.hasOwn(CLIENTS, picked) ? (picked as Client) : 'claude'), 'prompt');
   }
-  let now = $state(Date.now());
-  $effect(() => {
-    const t = setInterval(() => (now = Date.now()), 15_000);
-    return () => clearInterval(t);
-  });
-  const discuss = (id: string) => (annotationChat.markId = id);
+  const paired = $derived(!handheld.current && !!agent.address);
   const update = $derived(agent.status === 'live' ? connectorUpdate() : '');
-  const blocked = $derived(askBlocked());
-  let question = $state('');
-  let asking = $state(false);
-  let askError = $state('');
-  async function ask(e: SubmitEvent) {
-    e.preventDefault();
-    if (asking || blocked || !question.trim()) return;
-    [asking, askError] = [true, ''];
-    try {
-      await askNow(question.trim());
-      question = '';
-    } catch (err) {
-      askError = (err as Error).message;
-    } finally { asking = false; }
-  }
   const stop = () => stopAnswers().catch((err: Error) => (agent.error = `Could not turn off answers: ${err.message}`));
   const tap = (f: () => unknown) => (e: MouseEvent) => {
     (e.currentTarget as HTMLElement).blur();
     void f();
   };
+  let gearOpen = $state(false);
+  let gear = $state<HTMLButtonElement>();
+  const pick = (f: () => unknown) => () => {
+    gearOpen = false;
+    void f();
+  };
+  /** Counted as an open menu, so Esc closes it and not the chart coach or a form behind it. */
+  function popup(el: HTMLElement) {
+    el.focus();
+    menus.open++;
+    return () => {
+      menus.open--;
+      gearOpen = false;
+    };
+  }
+  function popupKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    gearOpen = false;
+    gear?.focus();
+  }
+  const left = (e: FocusEvent & { currentTarget: HTMLElement }) => {
+    if (e.relatedTarget && e.relatedTarget !== gear && !e.currentTarget.contains(e.relatedTarget as Node)) gearOpen = false;
+  };
+  const outside = (e: PointerEvent) => {
+    if (gearOpen && !(e.target as Element).closest?.('[data-testid=ai-settings], [data-testid=ai-gear]')) gearOpen = false;
+  };
 </script>
 
-<div class="ai" data-testid="ai-panel" data-status={agent.status}>
+<svelte:window onpointerdown={outside} />
+
+{#snippet notices()}
+  {#if companion.waiting}<p class="dim" data-testid="ai-permission-hint">Allow access to apps on this device (Chrome/Edge) or local network access (Firefox).</p>{/if}
+  {#if agent.error && !handheld.current}<p class="err" data-testid="ai-error">{agent.error}</p>{/if}
+  {#if agent.error && (agent.status === 'offline' || companion.retryPair)}<button class="open" data-testid="ai-retry" onclick={tap(retryNow)}>Retry</button>{/if}
+{/snippet}
+
+<div class="ai" class:paired data-testid="ai-panel" data-status={agent.status}>
   {#if handheld.current}
     <p data-testid="ai-desktop-only">{DESKTOP_ONLY}</p>
   {:else if agent.address}
     <div class="head">
       <span title="Your own AI (Claude Code, Codex or another MCP client) is paired with this browser">AI co-pilot <span class="dim">· MCP</span></span>
       <span class="state" class:live={agent.status === 'live'} data-testid="ai-status">{agent.status === 'live' ? 'Workspace live' : 'reconnecting…'}</span>
-      <button data-testid="ai-signout" onclick={tap(signOut)}>Sign out</button>
+      <button data-testid="ai-gear" aria-label="Co-pilot settings" aria-expanded={gearOpen} bind:this={gear} onclick={() => (gearOpen = !gearOpen)} onkeydown={(e) => e.key === 'Escape' && gearOpen && (e.stopPropagation(), (gearOpen = false))}>⚙</button>
     </div>
+    {#if gearOpen}
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div class="ui-menu settings" data-testid="ai-settings" role="group" aria-label="Co-pilot settings" tabindex="-1" onkeydown={popupKey} onfocusout={left} {@attach popup}>
+        <div class="opts" title="Your AI can draw on the chart, publish guidance and suggest a ticket you send yourself. Nothing else; conversations stay in your AI client.">
+          <label title="Shares this market, timeframe, public account address, visible indicators and hotkeys while this page is visible"><input type="checkbox" data-testid="ai-share-chart" checked={mentoring.shareChart} onchange={(e) => void setChartSharing(e.currentTarget.checked)} /> See my chart</label>
+          <label title="Levels, zones and bias labels your AI draws. Click one to ask about it."><input type="checkbox" data-testid="ai-show-marks" bind:checked={settings.chart.indicators.ai.on} onchange={() => persist()} /> Draw on it</label>
+          <label title="A browser notification when your AI publishes advice"><input type="checkbox" data-testid="ai-advice-notifications" checked={mentoring.notifications} onchange={(e) => setAdviceNotifications(e.currentTarget.checked)} /> Notify me</label>
+        </div>
+        {#if agent.answerer}<p data-testid="ai-answerer"><span class="ok">Claude Code answers what you type here</span>{agent.answerer.answering.length ? ' · answering…' : ''} <button data-testid="ai-answerer-off" onclick={pick(stop)}>Turn off</button></p>{/if}
+        <p class="dim">{companion.version ? `getliq ${companion.version} · ` : ''}{#if !terminalSessions().length}<span data-testid="ai-terminal-unavailable" title="Needs getliq 0.6.0 or later. Start your AI in Agent OS and ask it to report client_session with its session ID and terminal: true.">No terminal session yet.</span> · {/if}<button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={pick(openConnect)}>Connection…</button></p>
+        <p class="dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={pick(openCoach)}>Chart coach</button> · <button data-testid="ai-signout" onclick={pick(signOut)}>Sign out</button></p>
+      </div>
+    {/if}
     {#if update === 'restart'}
       <p class="warn" data-testid="ai-update">getliq {CONNECTOR_VERSION} is installed. If this stays, restart Claude Code or Codex to load it.</p>
     {:else if update}
@@ -74,41 +101,9 @@
       </p>
     {/if}
     {#if companion.updateError}<p class="err" data-testid="ai-update-error" title={companion.updateError}>Update failed. <button data-testid="ai-update-fallback" onclick={tap(copySetup)}>{copied === 'ok' ? 'Copied · run it in a terminal' : 'Copy the command instead'}</button></p>{/if}
-    {#if agent.answerer}
-      <p data-testid="ai-answerer"><span class="ok">Claude Code answers what you type here</span>{agent.answerer.answering.length ? ' · answering…' : ''} <button data-testid="ai-answerer-off" onclick={tap(stop)}>Turn off</button></p>
-      {#if agent.answerer.error}<p class="err" data-testid="ai-answerer-error">{agent.answerer.error}</p>{/if}
-    {:else if agent.status === 'live' && blocked}
-      <p class="warn" data-testid="ai-client">{blocked}</p>
-    {/if}
-    <form class="ask" onsubmit={ask}>
-      <input data-testid="ai-ask" bind:value={question} placeholder={`Ask about ${market.coin}…`} maxlength="1000" disabled={!!blocked} title={blocked} autocomplete="off" />
-      <button class="signin" data-testid="ai-ask-send" disabled={!!blocked || asking || !question.trim()}>{asking ? 'Sending…' : 'Ask'}</button>
-    </form>
-    {#if askError}<p class="err" data-testid="ai-ask-error">{askError}</p>{/if}
-    <AiTerminal />
-    <fieldset class="opts" data-testid="ai-settings" title="Your AI can draw on the chart, publish guidance and suggest a ticket you send yourself. Nothing else; conversations stay in your AI client.">
-      <legend class="dim">Settings</legend>
-      <label title="Shares this market, timeframe, public account address, visible indicators and hotkeys while this page is visible"><input type="checkbox" data-testid="ai-share-chart" checked={mentoring.shareChart} onchange={(e) => void setChartSharing(e.currentTarget.checked)} /> See my chart</label>
-      <label title="Levels, zones and bias labels your AI draws. Click one to ask about it."><input type="checkbox" data-testid="ai-show-marks" bind:checked={settings.chart.indicators.ai.on} onchange={() => persist()} /> Draw on it</label>
-      <label title="A browser notification when your AI publishes advice"><input type="checkbox" data-testid="ai-advice-notifications" checked={mentoring.notifications} onchange={(e) => setAdviceNotifications(e.currentTarget.checked)} /> Notify me</label>
-    </fieldset>
-    <strong>Guidance · {market.coin}</strong>
-    {#each agent.marks.filter((mark) => mark.coin === market.coin) as mark (mark.id)}
-      <button class="discuss" data-testid="ai-discuss-mark" onclick={() => discuss(mark.id)}>Discuss: {mark.label}</button>
-    {/each}
-    {#each agent.advice.filter((entry) => !entry.coin || entry.coin === market.coin) as entry (entry.id)}
-      <article data-testid="ai-advice">
-        <strong>{entry.skill}</strong>
-        <p>{entry.advice}</p>
-        <p class="dim">Practice: {entry.nextStep}</p>
-        <details><summary>Evidence &amp; reasoning summary{entry.stage ? ` · ${entry.stage.replaceAll('-', ' ')}` : ''}</summary><p class="dim">{entry.evidence}</p></details>
-      </article>
-    {/each}
-    {#each agent.suggestions as s (s.id)}
-      <SuggestionCard {s} {now} />
-    {:else}
-      <p class="dim" data-testid="ai-empty">{agent.advice.some((entry) => !entry.coin || entry.coin === market.coin) ? 'No staged tickets.' : 'Nothing yet. Ask above, or run /mcp__getliq__mentor in Claude Code.'}</p>
-    {/each}
+    {#if agent.answerer?.error}<p class="err" data-testid="ai-answerer-error">{agent.answerer.error}</p>{/if}
+    {@render notices()}
+    <AiThread />
   {:else if agent.status === 'offline'}
     <p class="dim" data-testid="ai-connecting">Reconnecting to your co-pilot… Keep your AI client running on this computer.</p>
   {:else}
@@ -139,14 +134,17 @@
       </button>
     </form>
   {/if}
-  <p class="coach-link dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={tap(openCoach)}>Chart coach</button>{#if agent.address} · <button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={tap(openConnect)}>Connection</button>{/if}</p>
-  {#if companion.waiting}<p class="dim" data-testid="ai-permission-hint">Allow access to apps on this device (Chrome/Edge) or local network access (Firefox).</p>{/if}
-  {#if agent.error && !handheld.current}<p class="err" data-testid="ai-error">{agent.error}</p>{/if}
-  {#if agent.error && (agent.status === 'offline' || companion.retryPair)}<button class="open" data-testid="ai-retry" onclick={tap(retryNow)}>Retry</button>{/if}
+  {#if !paired}
+    <p class="coach-link dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={tap(openCoach)}>Chart coach</button></p>
+    {@render notices()}
+  {/if}
 </div>
 
 <style>
   .ai { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 10px 10px; }
+  .ai.paired { position: relative; }
+  .settings { position: absolute; z-index: 6; top: calc(1.5em + 22px); left: 10px; right: 10px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+  .settings button { padding: 0; background: none; color: var(--accent); }
   .coach-link button, .card .dim button, .more { color: var(--accent); }
   .card .dim { position: relative; }
   .card .dim button { padding: 0; background: none; }
@@ -156,29 +154,22 @@
   .setup { display: flex; flex-wrap: wrap; gap: 8px; }
   .setup button { flex: 1 1 auto; padding: 0 12px; }
   .signin.alt { background: none; border: 1px solid var(--line); color: var(--accent); }
-  article { border: 1px solid var(--surface); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
   label { display: flex; align-items: center; gap: 8px; }
-  .opts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; border: 0; min-width: 0; }
-  .opts legend { padding: 0; margin-bottom: 6px; }
-  .discuss { align-self: flex-start; color: var(--accent); }
+  .opts { display: flex; flex-wrap: wrap; gap: 6px 14px; }
   .err button { color: var(--accent); }
   .pair { display: flex; flex-direction: column; gap: 8px; }
   .pair label { flex-direction: column; align-items: stretch; gap: 4px; }
   .head { display: flex; align-items: center; gap: 8px; color: var(--bright); }
   .head > span:first-child { flex: 1; min-width: 0; }
-  .head button { padding: 2px 8px; color: var(--dim); }
+  .head button { padding: 0 6px; color: var(--dim); font-size: calc(var(--fs) * 1.35); line-height: 1.2; }
   .state { color: var(--warn); font-size: max(8px, calc(var(--fs) * 0.917)); }
   .state.live { color: var(--buy); }
   .ok { color: var(--buy); }
   .warn { color: var(--warn); }
-  .ask { display: flex; gap: 8px; }
-  .ask input { flex: 1; min-width: 0; }
-  .ask button { padding: 0 14px; }
   .cmd { display: block; margin: 0; padding: 6px 8px; border: 1px solid var(--surface); border-radius: var(--radius); background: var(--bg); color: var(--bright); font: max(8px, calc(var(--fs) * 0.917)) / 1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
   a { color: var(--accent); }
   .open { align-self: flex-start; padding: 6px 12px; color: var(--bright); }
   .signin { height: var(--ctl); border-radius: var(--radius); background: var(--accent); color: var(--bg); }
-  summary { cursor: pointer; color: var(--dim); margin-bottom: 8px; }
   p { margin: 0; }
   .dim { color: var(--dim); }
   .err { color: var(--sell); overflow-wrap: anywhere; }

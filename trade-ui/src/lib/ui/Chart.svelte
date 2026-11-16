@@ -1312,7 +1312,7 @@
   .copilot-launch:hover { color: var(--bright); }
   .copilot-launch[aria-expanded='true'], .copilot-launch span { color: var(--accent); }
   .chart :global(.annotation-chat.top) { top: 40px; }
-  .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 72px); width: min(340px, calc(100% - var(--axis-w, 0px) - 16px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 48px); width: min(340px, calc(100% - var(--axis-w, 0px) - 16px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
   .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + 356px), 12px + 50%); }
   .chart-actions { margin-left: auto; }
   .chart-refresh { position: absolute; z-index: 2; transform: translateX(-50%); opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; }

@@ -13,11 +13,16 @@ export type Suggestion = {
   tp: number | null; sl: number | null; reason: string; confidence: number; created: number; expires: number; status: Status; acted: number | null;
 };
 export type Mark = { id: string; coin: string; type: 'level' | 'zone' | 'bias'; a: number | null; b: number | null; label: string; tone?: 'neutral' | 'support' | 'resistance' | 'invalidation'; author?: 'user' | 'ai' | null; interval?: string | null; t0?: number | null; t1?: number | null; created: number; expires: number };
-export type AnnotationChat = { mark: Mark; messages: { id: string; role: 'user' | 'assistant'; text: string; created: number; replyTo?: string }[]; updated: number };
+/** A file the user attached to a question, as the browser and the AI see it; the bytes stay in the database and are read with the attachment tool. */
+export type Attachment = { id: string; name: string; type: 'image/jpeg' | 'image/png' | 'text/plain'; size: number };
+export const ATTACHMENT_EXPIRED = 'attachment expired; attach again';
+const attachments = z.array(z.string().uuid()).min(1).max(4).optional();
+export type AnnotationChat = { mark: Mark; messages: { id: string; role: 'user' | 'assistant'; text: string; created: number; replyTo?: string; attachments?: Attachment[] }[]; updated: number };
 
 export const stage = z.enum(['unconscious-incompetence', 'conscious-incompetence', 'conscious-competence', 'unconscious-competence']);
-export const annotationQuestion = z.object({ markId: z.string().uuid(), message: z.string().trim().min(1).max(1000) }).strict();
-export const annotationReply = annotationQuestion.extend({ questionId: z.string().uuid() });
+const annotationMessage = z.object({ markId: z.string().uuid(), message: z.string().trim().min(1).max(1000) }).strict();
+export const annotationQuestion = annotationMessage.extend({ attachments });
+export const annotationReply = annotationMessage.extend({ questionId: z.string().uuid() });
 export type AnnotationQuestion = z.infer<typeof annotationQuestion>;
 export type AnnotationReply = z.infer<typeof annotationReply>;
 const YEAR = 365 * 86_400_000;
@@ -49,7 +54,8 @@ export const userMarkInput = z.object({
   t0: z.number().int(),
   t1: z.number().int(),
   message: z.string().trim().min(1).max(1000),
-  context: selectionContext.optional()
+  context: selectionContext.optional(),
+  attachments
 }).strict()
   .refine((m) => (m.type === 'zone') === (m.b !== undefined), 'a zone needs b; a level must not have it')
   .refine((m) => m.t0 <= m.t1 && m.t0 > Date.now() - YEAR && m.t1 < Date.now() + 86_400_000, 't0..t1 must be a range within the last year');
@@ -71,10 +77,11 @@ export type ClientSessionInput = z.infer<typeof clientSession>;
 export type ClientSession = ClientSessionInput & { at: number };
 export const terminalInput = z.object({
   id: z.string().uuid(), client: z.enum(['codex', 'claude-code']), sessionId: z.string().regex(/^[a-zA-Z0-9-]{1,100}$/),
-  message: z.string().trim().min(1).max(2000).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f]*$/)
+  message: z.string().trim().min(1).max(2000).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f]*$/),
+  attachments
 }).strict();
 export type TerminalInput = z.infer<typeof terminalInput>;
-export type TerminalCommand = TerminalInput & { created: number; updated: number; status: 'sending' | 'sent' | 'received' | 'replied' | 'failed'; reply?: string; error?: string };
+export type TerminalCommand = Omit<TerminalInput, 'attachments'> & { attachments?: Attachment[]; created: number; updated: number; status: 'sending' | 'sent' | 'received' | 'replied' | 'failed'; reply?: string; error?: string };
 export const chartContext = z.object({
   coin: z.string().trim().min(1).max(40),
   account: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),

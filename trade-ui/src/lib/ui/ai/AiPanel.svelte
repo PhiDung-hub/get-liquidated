@@ -3,7 +3,7 @@
   import { settings, persist } from '$lib/settings/settings.svelte';
   import { ui } from '$lib/ui/state.svelte';
   import { menus } from '$lib/ui/order/Menu.svelte';
-  import AiThread from './AiThread.svelte';
+  import AiThread, { onDock } from './AiThread.svelte';
   import { coach, showCoach } from './setups.svelte';
   import { CLIENTS, setupPrompt, type Client } from '$lib/agent/setupPrompt';
   import { load } from '$lib/util/storage';
@@ -63,6 +63,7 @@
 </script>
 
 <svelte:window onpointerdown={outside} />
+<svelte:document ondragover={(e) => onDock(e) && e.preventDefault()} ondrop={(e) => onDock(e) && e.preventDefault()} />
 
 {#snippet notices()}
   {#if companion.waiting}<p class="dim" data-testid="ai-permission-hint">Allow access to apps on this device (Chrome/Edge) or local network access (Firefox).</p>{/if}

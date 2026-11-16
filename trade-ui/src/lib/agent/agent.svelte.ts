@@ -9,9 +9,9 @@ import { toast } from '$lib/ui/toast.svelte';
 import { ui } from '$lib/ui/state.svelte';
 import { load, save } from '$lib/util/storage';
 import connector from './connector.json';
-import type { Action, AnnotationChat, ClientSession, Mark, SelectionContext, Suggestion, TerminalCommand, TerminalInput, UserMarkInput } from '../../../../agent/src/wire.ts';
+import type { Action, AnnotationChat, Attachment, ClientSession, Mark, SelectionContext, Suggestion, TerminalCommand, TerminalInput, UserMarkInput } from '../../../../agent/src/wire.ts';
 
-export type { Action, AnnotationChat, ClientSession, Mark, SelectionContext, Side, Status, Suggestion } from '../../../../agent/src/wire.ts';
+export type { Action, AnnotationChat, Attachment, ClientSession, Mark, SelectionContext, Side, Status, Suggestion } from '../../../../agent/src/wire.ts';
 export type Selection = Omit<UserMarkInput, 'message' | 'context'>;
 
 export type Advice = { id: string; kind: string; coin?: string; skill: string; stage?: string; evidence: string; advice: string; nextStep: string; created: number; expires: number };
@@ -66,9 +66,10 @@ const EXPIRED = 'This pairing link expired or was already used. Run getliq setup
 const DENIED = 'Your browser blocked this site from apps on your computer: Site settings → Local network access → Allow, then Retry.';
 /**
  * waiting: the companion has not answered for 1.5 s, which is usually the browser's local network prompt. revision and installed come from its /health:
- * the revision it runs ('old' when it predates reporting one, null when unknown or run from source) and the one setup installed last.
+ * the revision it runs ('old' when it predates reporting one, null when unknown or run from source), the one setup installed last, and attach: whether it takes attachments (getliq 0.7.0).
  */
-export const companion = $state({ waiting: false, retryPair: false, revision: null as string | null, installed: null as string | null, version: '', updating: false, updateError: '' });
+export const companion = $state({ waiting: false, retryPair: false, revision: null as string | null, installed: null as string | null, version: '', attach: false, updating: false, updateError: '' });
+export const ATTACH_NEEDS = `Attaching needs getliq ${CONNECTOR_VERSION}; update it first`;
 const BAD_FRAME = 'the agent sent a frame that does not parse';
 const SHARING_FAILED = 'Chart sharing failed';
 
@@ -145,7 +146,7 @@ async function reach(ms: number, secret: string, status: number) {
     if (body.proto !== 1 || !Array.isArray(body.proofs)) throw new AgentError(0, 'Update getliq using the setup instructions in Co-pilot, then restart your AI client');
     if (!body.proofs.includes(await proof(secret, nonce))) throw new AgentError(status, `getliq on port ${PORT} does not know this pairing`);
     const rev = (v: unknown) => (typeof v === 'string' && /^[0-9a-f]{40}$/.test(v) ? v : null);
-    Object.assign(companion, { revision: 'revision' in body ? rev(body.revision) : 'old', installed: rev(body.installed), version: typeof body.version === 'string' ? body.version.slice(0, 20) : '' });
+    Object.assign(companion, { revision: 'revision' in body ? rev(body.revision) : 'old', installed: rev(body.installed), version: typeof body.version === 'string' ? body.version.slice(0, 20) : '', attach: body.attachments === true });
     verified = true;
   } finally {
     clearTimeout(slow);
@@ -186,12 +187,15 @@ const validSession = (s: ClientSession) => s && ['codex', 'claude-code', 'other'
   && ['active', 'idle', 'ended'].includes(s.status) && Number.isFinite(s.at)
   && (s.sessionId === undefined || (typeof s.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(s.sessionId)))
   && (s.localUrl === undefined || safeUrl(s.localUrl)) && (s.terminal === undefined || typeof s.terminal === 'boolean');
+const isAttachment = (a: Attachment) => a && typeof a.id === 'string' && /^[0-9a-f-]{36}$/.test(a.id) && ['image/jpeg', 'image/png', 'text/plain'].includes(a.type)
+  && Number.isFinite(a.size) && typeof a.name === 'string' && a.name.length <= 80;
+const attachmentsOk = (list: unknown) => list === undefined || (Array.isArray(list) && list.length <= 4 && list.every(isAttachment));
 const validCommand = (c: TerminalCommand) => c && typeof c.id === 'string' && /^[0-9a-f-]{36}$/.test(c.id)
   && ['codex', 'claude-code'].includes(c.client) && typeof c.sessionId === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(c.sessionId)
   && typeof c.message === 'string' && c.message.length <= 2000 && Number.isFinite(c.created) && Number.isFinite(c.updated)
   && ['sending', 'sent', 'received', 'replied', 'failed'].includes(c.status)
   && (c.reply === undefined || (typeof c.reply === 'string' && c.reply.length <= 6000))
-  && (c.error === undefined || (typeof c.error === 'string' && c.error.length <= 300));
+  && (c.error === undefined || (typeof c.error === 'string' && c.error.length <= 300)) && attachmentsOk(c.attachments);
 
 // Connected means a client in a turn (active), or one that finished a turn or called a tool in the last few minutes: a client killed after reporting idle never reports ended.
 const ACTIVE_MS = 30 * 60_000;
@@ -283,7 +287,7 @@ const isChat = (chat: AnnotationChat) => chat && typeof chat.mark?.id === 'strin
   && Array.isArray(chat.messages) && chat.messages.length <= 40
   && chat.messages.every((message) => message && typeof message.id === 'string' && ['user', 'assistant'].includes(message.role)
     && typeof message.text === 'string' && message.text.length <= 1000 && Number.isFinite(message.created)
-    && (message.replyTo === undefined || typeof message.replyTo === 'string'));
+    && (message.replyTo === undefined || typeof message.replyTo === 'string') && attachmentsOk(message.attachments));
 const finiteOrNull = (x: unknown) => x === null || Number.isFinite(x);
 const isAnswerer = (a: Answerer) => a?.on === true && Array.isArray(a.answering) && a.answering.length <= 6 && a.answering.every((id) => typeof id === 'string')
   && (a.error === undefined || (typeof a.error === 'string' && a.error.length <= 300));
@@ -562,9 +566,20 @@ export function signOut() {
   contextWrite.then(() => bearer && call('logout', post({}), bearer)).catch((e: Error) => (agent.error = `Sign-out failed: ${e.message}`));
 }
 
-export async function askAnnotation(markId: string, message: string) {
+/** Stores one file with the companion for the next question; the id it answers with is what the question then names. */
+export async function uploadAttachment(file: Blob, name: string) {
+  const sent = await call<Attachment>(`attachments?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'content-type': file.type }, body: file }).catch((e: AgentError) => {
+    throw e.status === 404 ? new Error(ATTACH_NEEDS) : e;
+  });
+  if (!isAttachment(sent)) throw new Error('Invalid attachment response');
+  return sent;
+}
+/** The key is sent only with files, so a plain question's body is what it always was. */
+const attached = (attachments?: string[]) => (attachments?.length ? { attachments } : {});
+
+export async function askAnnotation(markId: string, message: string, attachments?: string[]) {
   const address = agent.address;
-  const chat = await call<AnnotationChat>('annotation-chat', post({ markId, message }));
+  const chat = await call<AnnotationChat>('annotation-chat', post({ markId, message, ...attached(attachments) }));
   if (agent.address !== address) throw new Error('AI workspace changed; reconnect before sending another question');
   if (!isState({ suggestions: [], marks: [], chats: [chat] })) throw new Error('Invalid annotation chat response');
   const existing = agent.chats.find((entry) => entry.mark.id === markId);
@@ -572,13 +587,14 @@ export async function askAnnotation(markId: string, message: string) {
 }
 
 /** Saves a point or zone picked on the chart with its first question and what the chart drew inside it; the local AI answers it as an annotation thread. */
-export async function askSelection(selection: Selection, message: string, context?: SelectionContext): Promise<Mark> {
+export async function askSelection(selection: Selection, message: string, context?: SelectionContext, attachments?: string[]): Promise<Mark> {
   const address = agent.address;
-  const { mark, chat } = await call<{ mark: Mark; chat: AnnotationChat }>('marks', post({ ...selection, message, ...(context ? { context } : {}) }));
+  const { mark, chat } = await call<{ mark: Mark; chat: AnnotationChat }>('marks', post({ ...selection, message, ...(context ? { context } : {}), ...attached(attachments) }));
   if (agent.address !== address) throw new Error('AI workspace changed; reconnect before sending another question');
   if (!isState({ suggestions: [], marks: [mark], chats: [chat] })) throw new Error('Invalid annotation response');
   agent.marks = [mark, ...agent.marks.filter((m) => m.id !== mark.id)];
-  agent.chats = [chat, ...agent.chats.filter((c) => c.mark.id !== mark.id)].slice(0, 50);
+  const live = agent.chats.find((c) => c.mark.id === mark.id);
+  if (!live || live.updated <= chat.updated) agent.chats = [chat, ...agent.chats.filter((c) => c.mark.id !== mark.id)].slice(0, 50);
   return mark;
 }
 
@@ -587,19 +603,19 @@ export const copyRequest = (mark: Pick<Mark, 'id' | 'coin'>) => `Use getliq anno
 
 /** The panel's composer: continues this coin's panel thread (its mark id is kept per coin, so a reload continues it), else asks about a point at the mark price now on the chart's interval; a running session is asked to answer when Claude Code does not. */
 const PANEL_THREADS = 'trade-ui:panel-threads';
-export async function askNow(message: string) {
+export async function askNow(message: string, attachments?: string[]) {
   const coin = market.coin;
   const saved = load<Record<string, unknown> | null>(PANEL_THREADS, null);
   const threads = saved && typeof saved === 'object' ? saved : {};
   const chat = agent.chats.find((c) => c.mark.id === threads[coin] && c.mark.coin === coin);
   // A thread anchored over an hour ago, or near its message limits, gives way to a new point at today's price.
   let id = chat && Date.now() - (chat.mark.t1 ?? 0) < 3_600_000 && chat.messages.length < 38 && chat.messages.filter((m) => m.role === 'user').length < 20 ? chat.mark.id : '';
-  if (id) await askAnnotation(id, message);
+  if (id) await askAnnotation(id, message, attachments);
   else {
     const px = market.ctx?.markPx ?? 0;
     if (!(px > 0)) throw new Error(`No price for ${coin} yet`);
     const t = Date.now();
-    id = (await askSelection({ coin, interval: settings.chart.interval, type: 'level', a: px, t0: t, t1: t }, message)).id;
+    id = (await askSelection({ coin, interval: settings.chart.interval, type: 'level', a: px, t0: t, t1: t }, message, undefined, attachments)).id;
     save(PANEL_THREADS, { ...threads, [coin]: id });
   }
   if (!agent.answerer) void wakeSession(id).catch(() => false);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { agent, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers, terminalSessions } from '$lib/agent/agent.svelte';
+  import { agent, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, SESSION_NEEDS, setAutoCompact, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers, terminalSessions, type AutoCompact } from '$lib/agent/agent.svelte';
   import { settings, persist } from '$lib/settings/settings.svelte';
   import { ui } from '$lib/ui/state.svelte';
   import { menus } from '$lib/ui/order/Menu.svelte';
@@ -29,6 +29,14 @@
   const paired = $derived(!handheld.current && !!agent.address);
   const update = $derived(agent.status === 'live' ? connectorUpdate() : '');
   const stop = () => stopAnswers().catch((err: Error) => (agent.error = `Could not turn off answers: ${err.message}`));
+  /** The persistent conversation, only from a getliq that keeps one (0.8.0). */
+  const conversation = $derived(companion.session ? agent.answerer?.session : undefined);
+  const autoTitle = $derived(conversation ? 'The conversation is summarised on its own once it holds about this many tokens; /compact does it now.' : SESSION_NEEDS);
+  const thousands = (tokens: number) => (tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens));
+  const autoCompact = (select: HTMLSelectElement) => setAutoCompact(select.value as AutoCompact).catch((err: Error) => {
+    select.value = conversation?.auto ?? 'off';
+    agent.error = `Could not change auto-compact: ${err.message}`;
+  });
   const tap = (f: () => unknown) => (e: MouseEvent) => {
     (e.currentTarget as HTMLElement).blur();
     void f();
@@ -103,7 +111,15 @@
           <label title="Levels, zones and bias labels your AI draws. Click one to ask about it."><input type="checkbox" data-testid="ai-show-marks" bind:checked={settings.chart.indicators.ai.on} onchange={() => persist()} /> Draw on it</label>
           <label title="A browser notification when your AI publishes advice"><input type="checkbox" data-testid="ai-advice-notifications" checked={mentoring.notifications} onchange={(e) => setAdviceNotifications(e.currentTarget.checked)} /> Notify me</label>
         </div>
-        {#if agent.answerer}<p data-testid="ai-answerer"><span class="ok">Claude Code answers what you type here</span>{agent.answerer.answering.length ? ' · answering…' : ''} <button data-testid="ai-answerer-off" onclick={pick(stop)}>Turn off</button></p>{/if}
+        {#if agent.answerer}<p data-testid="ai-answerer"><span class="ok">Claude Code answers what you type here</span>{agent.answerer.answering.length ? ' · answering…' : ''} <button data-testid="ai-answerer-off" onclick={pick(stop)}>Turn off</button></p>
+          <p data-testid="ai-session" title={conversation ? 'Every question here and on the chart continues one Claude Code conversation kept on this computer. /clear starts a new one.' : SESSION_NEEDS}>{conversation ? `One conversation · ${conversation.turns} turn${conversation.turns === 1 ? '' : 's'} · ~${thousands(conversation.tokens)} tokens` : 'Each question is a separate run'}</p>
+          <label title={autoTitle}>Auto-compact
+            <select data-testid="ai-autocompact" title={autoTitle} disabled={!conversation} value={conversation?.auto ?? 'off'} onchange={(e) => void autoCompact(e.currentTarget)}>
+              <option value="off">Off</option><option value="30k">30k</option><option value="60k">60k</option><option value="120k">120k</option>
+            </select>
+          </label>
+          {#if conversation}<p class="dim" data-testid="ai-sources" title="Changed only in ~/.getliq/answerer.json on this computer">Data: getliq{conversation.web === 'off' ? '' : ' · web'}{conversation.sources.map((name) => ` · ${name}`).join('')}</p>{/if}
+        {/if}
         <p class="dim">{companion.version ? `getliq ${companion.version} · ` : ''}{#if !terminalSessions().length}<span data-testid="ai-terminal-unavailable" title="Needs getliq 0.6.0 or later. Start your AI in Agent OS and ask it to report client_session with its session ID and terminal: true.">No terminal session yet.</span> · {/if}<button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={pick(openConnect)}>Connection…</button></p>
         <p class="dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={pick(openCoach)}>Chart coach</button> · <button data-testid="ai-signout" onclick={pick(signOut)}>Sign out</button></p>
       </div>

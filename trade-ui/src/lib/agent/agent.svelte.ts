@@ -15,7 +15,9 @@ export type { Action, AnnotationChat, Attachment, ClientSession, Mark, Selection
 export type Selection = Omit<UserMarkInput, 'message' | 'context'>;
 
 export type Advice = { id: string; kind: string; coin?: string; skill: string; stage?: string; evidence: string; advice: string; nextStep: string; created: number; expires: number };
-type Answerer = { on: true; answering: string[]; error?: string };
+export type AutoCompact = 'off' | '30k' | '60k' | '120k';
+/** session (getliq 0.8.0): the one conversation every answer continues, what it may read, and what it did on its own or on command. */
+type Answerer = { on: true; answering: string[]; error?: string; session?: { since: number | null; turns: number; tokens: number; auto: AutoCompact; web: 'off' | 'any' | 'listed'; sources: string[]; notes: { id: string; at: number; kind: string; text: string }[] } };
 type State = { suggestions: Suggestion[]; marks: Mark[]; advice?: Advice[]; chats?: AnnotationChat[]; answerer?: Answerer; commands?: TerminalCommand[] };
 export type ToolCall = { id: number; at: number; tool: string; status: 'ok' | 'error'; durationMs: number };
 /** The local AI clients of this workspace, read every 15 s while signed in; `now` is the time of the last read, so ages and `askBlocked` move with it. */
@@ -68,8 +70,9 @@ const DENIED = 'Your browser blocked this site from apps on your computer: Site 
  * waiting: the companion has not answered for 1.5 s, which is usually the browser's local network prompt. revision and installed come from its /health:
  * the revision it runs ('old' when it predates reporting one, null when unknown or run from source), the one setup installed last, and attach: whether it takes attachments (getliq 0.7.0).
  */
-export const companion = $state({ waiting: false, retryPair: false, revision: null as string | null, installed: null as string | null, version: '', attach: false, updating: false, updateError: '' });
+export const companion = $state({ waiting: false, retryPair: false, revision: null as string | null, installed: null as string | null, version: '', attach: false, session: false, updating: false, updateError: '' });
 export const ATTACH_NEEDS = `Attaching needs getliq ${CONNECTOR_VERSION}; update it first`;
+export const SESSION_NEEDS = `Needs getliq ${CONNECTOR_VERSION}; update it first`;
 const BAD_FRAME = 'the agent sent a frame that does not parse';
 const SHARING_FAILED = 'Chart sharing failed';
 
@@ -146,7 +149,7 @@ async function reach(ms: number, secret: string, status: number) {
     if (body.proto !== 1 || !Array.isArray(body.proofs)) throw new AgentError(0, 'Update getliq using the setup instructions in Co-pilot, then restart your AI client');
     if (!body.proofs.includes(await proof(secret, nonce))) throw new AgentError(status, `getliq on port ${PORT} does not know this pairing`);
     const rev = (v: unknown) => (typeof v === 'string' && /^[0-9a-f]{40}$/.test(v) ? v : null);
-    Object.assign(companion, { revision: 'revision' in body ? rev(body.revision) : 'old', installed: rev(body.installed), version: typeof body.version === 'string' ? body.version.slice(0, 20) : '', attach: body.attachments === true });
+    Object.assign(companion, { revision: 'revision' in body ? rev(body.revision) : 'old', installed: rev(body.installed), version: typeof body.version === 'string' ? body.version.slice(0, 20) : '', attach: body.attachments === true, session: body.session === true });
     verified = true;
   } finally {
     clearTimeout(slow);
@@ -289,8 +292,13 @@ const isChat = (chat: AnnotationChat) => chat && typeof chat.mark?.id === 'strin
     && typeof message.text === 'string' && message.text.length <= 1000 && Number.isFinite(message.created)
     && (message.replyTo === undefined || typeof message.replyTo === 'string') && attachmentsOk(message.attachments));
 const finiteOrNull = (x: unknown) => x === null || Number.isFinite(x);
+const short = (max: number) => (x: unknown) => typeof x === 'string' && x.length <= max;
+const isSession = (s: NonNullable<Answerer['session']>) => !!s && finiteOrNull(s.since) && Number.isFinite(s.turns) && Number.isFinite(s.tokens)
+  && ['off', '30k', '60k', '120k'].includes(s.auto) && ['off', 'any', 'listed'].includes(s.web)
+  && Array.isArray(s.sources) && s.sources.length <= 8 && s.sources.every(short(32))
+  && Array.isArray(s.notes) && s.notes.length <= 20 && s.notes.every((n) => n && short(40)(n.id) && Number.isFinite(n.at) && short(20)(n.kind) && short(200)(n.text));
 const isAnswerer = (a: Answerer) => a?.on === true && Array.isArray(a.answering) && a.answering.length <= 6 && a.answering.every((id) => typeof id === 'string')
-  && (a.error === undefined || (typeof a.error === 'string' && a.error.length <= 300));
+  && (a.error === undefined || (typeof a.error === 'string' && a.error.length <= 300)) && (a.session === undefined || isSession(a.session));
 const isSuggestion = (s: Suggestion) => s && typeof s.id === 'string' && typeof s.coin === 'string' && ['buy', 'sell'].includes(s.side)
   && ['market', 'limit'].includes(s.kind) && ['coin', 'usd'].includes(s.unit) && Number.isFinite(s.size) && typeof s.reason === 'string'
   && [s.px, s.tp, s.sl].every(finiteOrNull) && (s.kind === 'market' || Number.isFinite(s.px))
@@ -626,6 +634,10 @@ export async function stopAnswers() {
   await call('answerer', post({ on: false }));
   agent.answerer = null;
 }
+
+/** /compact and /clear take their turn behind the questions already waiting; the result arrives as a note in the answerer's state. */
+export const sessionCommand = (command: 'compact' | 'clear') => call('answerer', post({ command }));
+export const setAutoCompact = (auto: AutoCompact) => call('answerer', post({ auto }));
 
 export async function deleteMark(id: string) {
   await call('marks/' + encodeURIComponent(id), { method: 'DELETE' });

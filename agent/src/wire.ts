@@ -139,3 +139,24 @@ export const markInput = z.object({
 });
 export type SuggestInput = z.infer<typeof suggestInput>;
 export type MarkInput = z.infer<typeof markInput>;
+
+export const AUTO_COMPACT = ['off', '30k', '60k', '120k'] as const;
+export type AutoCompact = (typeof AUTO_COMPACT)[number];
+/** All a browser may ask of the answerer: turn it off, queue a session command, or pick an auto-compact size. Never on, and never tools, web, sources, model or prompt. */
+export const answererInput = z.union([
+  z.object({ on: z.literal(false) }).strict(),
+  z.object({ command: z.enum(['compact', 'clear']) }).strict(),
+  z.object({ auto: z.enum(AUTO_COMPACT) }).strict()
+]);
+
+const sourceTools = z.array(z.string().regex(/^(\*|[A-Za-z0-9_-]{1,64})$/)).min(1).max(32);
+const secrets = z.record(z.string().min(1).max(200), z.string().max(4000)).default({});
+/** ~/.getliq/answerer.json, written by hand in a terminal: the only way the answerer gets web access or the user's own MCP servers. Names carry no underscore, so mcp__<name>__ prefixes cannot collide. */
+export const answererConfig = z.object({
+  web: z.union([z.boolean(), z.array(z.string().regex(/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/)).min(1).max(32)]).default(false),
+  sources: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).refine((name) => name !== 'getliq', 'getliq is reserved'), z.union([
+    z.object({ command: z.string().min(1).max(1000), args: z.array(z.string().max(4000)).max(64).default([]), env: secrets, tools: sourceTools }).strict(),
+    z.object({ type: z.literal('http'), url: z.string().max(2000).refine((url) => /^https?:$/.test(URL.parse(url)?.protocol ?? ''), 'must be an http(s) URL'), headers: secrets, tools: sourceTools }).strict()
+  ])).refine((sources) => Object.keys(sources).length <= 8, 'at most 8 sources').default({})
+}).strict();
+export type AnswererConfig = z.infer<typeof answererConfig>;

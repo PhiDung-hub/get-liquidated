@@ -41,12 +41,12 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  let { at, ai = false, text, testid, children }: { at: number; ai?: boolean; text: string; testid?: string; children?: Snippet } = $props();
+  let { at, ai = false, system = false, text, testid, children }: { at: number; ai?: boolean; system?: boolean; text: string; testid?: string; children?: Snippet } = $props();
 </script>
 
-<div class="msg" class:ai data-testid="ai-msg" data-role={ai ? 'assistant' : 'user'}>
+<div class="msg" class:ai class:system data-testid="ai-msg" data-role={system ? 'system' : ai ? 'assistant' : 'user'}>
   <time datetime={new Date(at).toISOString()}>{clock(at)}</time>
-  <span class="glyph" aria-hidden="true">{ai ? '●' : '❯'}</span>
+  <span class="glyph" aria-hidden="true">{system ? '·' : ai ? '●' : '❯'}</span>
   <div class="body">
     {#if ai}
       <div class="text" data-testid={testid}>
@@ -55,7 +55,7 @@
           {:else}<div class="ln" class:gap={b.gap} class:li={!!b.marker}>{#if b.marker}<span class="mk">{b.marker}</span>{/if}<span>{#each b.parts as p}{#if p.kind === 'code'}<code>{p.text}</code>{:else if p.kind === 'strong'}<strong>{p.text}</strong>{:else if p.kind === 'num'}<span class="num">{p.text}</span>{:else}{p.text}{/if}{/each}</span></div>{/if}
         {/each}
       </div>
-    {:else}<p class="text" data-testid={testid}>{text}</p>{/if}
+    {:else}<p class="text" data-testid={system ? 'ai-system' : testid}>{text}</p>{/if}
     {@render children?.()}
   </div>
 </div>
@@ -66,6 +66,7 @@
   time { color: var(--dim); font-size: max(8px, 0.917em); }
   .glyph, .mk, .num { color: var(--accent); }
   .ai .glyph { color: var(--buy); }
+  .system .glyph, .system .text { color: var(--dim); }
   .body { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   .text { margin: 0; max-width: 100%; line-height: 1.5; }
   p.text { white-space: pre-wrap; }

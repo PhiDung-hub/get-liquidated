@@ -1,12 +1,13 @@
 <script module lang="ts">
   type Pending = { key: number; name: string; image: boolean; size: number; thumb?: string; id?: string; error?: string };
-  const composer = $state({ draft: '', target: '', files: [] as Pending[] });
+  const composer = $state({ draft: '', target: '', files: [] as Pending[], help: [] as number[] });
+  const HELP = '/compact summarises this conversation to free context · /clear starts a new one · /help shows this. Auto-compact is in ⚙.';
   let attachSeq = 0;
   export const onDock = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files') && !!(e.target as Element | null)?.closest?.('.copilot');
 </script>
 
 <script lang="ts">
-  import { agent, annotationChat, askBlocked, askNow, ATTACH_NEEDS, companion, connection, copyRequest, sendTerminal, terminalSessions, uploadAttachment, WAKE, type Advice, type Attachment, type Mark, type Suggestion } from '$lib/agent/agent.svelte';
+  import { agent, annotationChat, askBlocked, askNow, ATTACH_NEEDS, companion, connection, copyRequest, sendTerminal, SESSION_NEEDS, sessionCommand, terminalSessions, uploadAttachment, WAKE, type Advice, type Attachment, type Mark, type Suggestion } from '$lib/agent/agent.svelte';
   import { market } from '$lib/market/market.svelte';
   import { meta } from '$lib/market/meta.svelte';
   import { isTouch } from '$lib/ui/touch';
@@ -21,7 +22,8 @@
     | { kind: 'command'; key: string; at: number; command: Command }
     | { kind: 'advice'; key: string; at: number; entry: Advice }
     | { kind: 'ticket'; key: string; at: number; s: Suggestion }
-    | { kind: 'mark'; key: string; at: number; mark: Mark };
+    | { kind: 'mark'; key: string; at: number; mark: Mark }
+    | { kind: 'system'; key: string; at: number; text: string };
 
   const OPEN = ['sending', 'sent', 'received'];
   const statuses = { sending: 'Sending to terminal', sent: 'Sent to terminal · awaiting AI', received: 'Read by AI · awaiting reply', replied: 'Replied', failed: 'Delivery unconfirmed' };
@@ -33,7 +35,9 @@
     ...agent.commands.filter((c) => !c.message.startsWith(WAKE)).map((command): Row => ({ kind: 'command', key: `t:${command.id}`, at: command.created, command })),
     ...agent.advice.filter((entry) => !entry.coin || entry.coin === market.coin).map((entry): Row => ({ kind: 'advice', key: `a:${entry.id}`, at: entry.created, entry })),
     ...agent.suggestions.map((s): Row => ({ kind: 'ticket', key: `s:${s.id}`, at: s.created, s })),
-    ...agent.marks.filter((mark) => mark.coin === market.coin && mark.author !== 'user').map((mark): Row => ({ kind: 'mark', key: `m:${mark.id}`, at: finite(mark.created), mark }))
+    ...agent.marks.filter((mark) => mark.coin === market.coin && mark.author !== 'user').map((mark): Row => ({ kind: 'mark', key: `m:${mark.id}`, at: finite(mark.created), mark })),
+    ...(agent.answerer?.session?.notes ?? []).map((note): Row => ({ kind: 'system', key: `n:${note.id}`, at: note.at, text: note.text })),
+    ...composer.help.map((at, i): Row => ({ kind: 'system', key: `h:${i}`, at, text: HELP }))
   ].sort((a, b) => a.at - b.at));
   const chatRows = $derived(rows.filter((row): row is ChatRow => row.kind === 'chat'));
   const anchors = $derived(new Set(chatRows.filter((row, i) => row.mark.id !== chatRows[i - 1]?.mark.id).map((row) => row.key)));
@@ -122,6 +126,7 @@
   });
   const woken = $derived(pending && agent.commands.find((c) => c.message.startsWith(WAKE) && c.message.includes(`markId ${pending.mark.id} `) && OPEN.includes(c.status) && c.created >= pending.at && connection.now - c.created < 180_000));
   const answering = $derived(!!pending && !!agent.answerer?.answering.includes(pending.mark.id));
+  const compacting = $derived(agent.answerer?.answering[0] === '/compact');
   const status = $derived(answering ? 'Claude Code is answering…' : agent.answerer ? 'Waiting for Claude Code to answer.' : woken ? `Sent to ${woken.client} · ${woken.sessionId}. Its reply appears here.` : 'Waiting for your local AI client to read and reply.');
   let now = $state(Date.now());
   $effect(() => {
@@ -139,7 +144,7 @@
   let log = $state<HTMLOListElement>();
   let stuck = true;
   $effect(() => {
-    void [rows, pending, status];
+    void [rows, pending, status, compacting];
     if (log && stuck) log.scrollTop = log.scrollHeight;
   });
 
@@ -149,9 +154,12 @@
   const blocked = $derived(composer.target ? '' : askBlocked());
   const waiting = $derived(!!composer.target && agent.commands.some((c) => `${c.client}:${c.sessionId}` === composer.target && connection.now - c.created < 180_000 && OPEN.includes(c.status)));
   const cap = $derived(composer.target ? 2000 : 1000);
+  /** A session command is the whole message, with no files, typed for the chart; a terminal session gets the text as it is. */
+  const command = $derived(composer.target || composer.files.length ? undefined : (/^\/(compact|clear|help)$/.exec(composer.draft.trim())?.[1] as 'compact' | 'clear' | 'help' | undefined));
+  const commandBlocked = $derived(!command || command === 'help' ? '' : !agent.answerer ? 'Session commands need answers on screen (getliq setup --answer in a terminal)' : !companion.session ? SESSION_NEEDS : '');
   let sending = $state(false);
   let error = $state('');
-  const disabled = $derived(!composer.draft.trim() || composer.draft.length > cap || sending || !!blocked || gone || waiting || uploading || failed || (!!composer.target && agent.status !== 'live'));
+  const disabled = $derived(!composer.draft.trim() || composer.draft.length > cap || sending || !!blocked || !!commandBlocked || gone || waiting || uploading || failed || (!!composer.target && agent.status !== 'live'));
   $effect(() => {
     void [composer.draft, composer.target, gone, blocked];
     error = '';
@@ -169,7 +177,9 @@
     const ids = composer.files.flatMap((f) => (f.id ? [f.id] : []));
     [sending, error] = [true, ''];
     try {
-      if (session) {
+      if (command === 'help') composer.help = [...composer.help, Date.now()];
+      else if (command) await sessionCommand(command);
+      else if (session) {
         await sendTerminal(prompt(message, ids));
         retry = null;
       } else await askNow(message, ids);
@@ -234,6 +244,7 @@
   {#each rows as row (row.key)}
     {#if row.kind === 'chat'}{@render chatRow(row)}
     {:else if row.kind === 'command'}{@render commandRow(row.command)}
+    {:else if row.kind === 'system'}<li><AiMessage at={row.at} system text={row.text} /></li>
     {:else if row.kind === 'ticket'}<li><SuggestionCard s={row.s} {now} /></li>
     {:else if row.kind === 'mark'}
       <li><small>◇ {row.mark.type}{row.mark.a !== null ? ` ${price(row.mark, row.mark.a)}` : ''}</small><button class="link" data-testid="ai-discuss-mark" onclick={() => (annotationChat.markId = row.mark.id)}>Discuss: {row.mark.label}</button></li>
@@ -247,7 +258,8 @@
     {/if}
   {/each}
 </ol>
-{#if pending}
+{#if compacting}<p class="dim" data-testid="ai-waiting" role="status">Compacting the conversation…</p>
+{:else if pending}
   <p class="dim" data-testid="ai-waiting" role="status">{status}{#if answering}<span aria-hidden="true"> {Math.max(0, Math.round((now - pending.at) / 1000))}s</span>{/if}
     {#if !agent.answerer && !woken}<button class="link" data-testid="ai-copy-request" onclick={() => copy(pending.mark)}>{copied === pending.mark.id ? 'Copied — paste into your AI client' : 'Copy request for Codex / Claude'}</button>{/if}
   </p>
@@ -266,7 +278,7 @@
   {/if}
   <div class="line">
     <textarea data-testid="ai-ask" rows="1" aria-label={session ? 'Prompt' : `Question about ${market.coin}`} bind:this={box} bind:value={composer.draft} placeholder={composer.target ? 'Prompt your running AI…' : `Ask about ${market.coin}…`} maxlength={cap} disabled={!!blocked} title={blocked} onkeydown={keys} onpaste={pasted} oninput={() => (browsing = -1)}></textarea>
-    <button class="send" data-testid="ai-ask-send" {disabled} title="Enter sends · Shift+Enter adds a line · ↑ recalls your last message. Your AI can also start: run /mcp__getliq__mentor in Claude Code.">{sending ? 'Sending…' : 'Send'}</button>
+    <button class="send" data-testid="ai-ask-send" {disabled} title={commandBlocked || 'Enter sends · Shift+Enter adds a line · ↑ recalls your last message · /help lists session commands. Your AI can also start: run /mcp__getliq__mentor in Claude Code.'}>{sending ? 'Sending…' : 'Send'}</button>
   </div>
   <div class="foot">
   <input type="file" multiple hidden accept="image/*,text/*,.md,.csv,.json,.log" data-testid="ai-attach-file" bind:this={picker} onchange={picked} />

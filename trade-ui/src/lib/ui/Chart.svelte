@@ -1308,7 +1308,9 @@
 <style>
   .coach-launch { display: inline-flex; align-items: center; gap: 4px; background: none; color: var(--dim); }
   .coach-launch.on, .coach-launch span { color: var(--accent); }
-  .copilot-launch { position: absolute; z-index: 8; top: 8px; right: calc(var(--axis-w, 0px) + 8px); display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--radius); background: var(--accent); color: var(--bg); font-weight: 700; }
+  .copilot-launch { position: absolute; z-index: 8; top: 8px; right: calc(var(--axis-w, 0px) + 8px); display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--dim); }
+  .copilot-launch:hover { color: var(--bright); }
+  .copilot-launch[aria-expanded='true'], .copilot-launch span { color: var(--accent); }
   .chart :global(.annotation-chat.top) { top: 40px; }
   .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 72px); width: min(340px, calc(100% - var(--axis-w, 0px) - 16px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
   .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + 356px), 12px + 50%); }

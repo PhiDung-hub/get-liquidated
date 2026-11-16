@@ -11,7 +11,7 @@
   import { net } from '$lib/transport/network';
   import { closing } from '$lib/orders/ticket.svelte';
   import { optPx } from '$lib/orders/tpsl';
-  import { roundPx, roundSz, tickSize } from '$lib/signing/wire';
+  import { cutDecimals, cutPx, cutSz, roundPx, roundSz, tickSize } from '$lib/signing/wire';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { ui } from '../state.svelte';
   import Coin from '../Coin.svelte';
@@ -61,6 +61,8 @@
     const move = unit === 'percent' ? entry * value / (100 * leverage) : value / exitQuantity(kind);
     return entry + (long ? 1 : -1) * (kind === 'TP' ? 1 : -1) * move;
   }
+  /** A trigger price follows the tick rule; ROE % and PnL keep 2 places and may be negative (a stop past entry). */
+  const typed = (unit: Unit) => (v: string) => (unit === 'price' ? cutPx(v, t) : cutDecimals(v, 2, true));
   function changeUnit(kind: 'TP' | 'SL', unit: Unit) {
     const oldText = kind === 'TP' ? tp : sl;
     let text = oldText;
@@ -69,7 +71,7 @@
       if (price !== null && entry && entry > 0) {
         const move = (price - entry) * (long ? 1 : -1) * (kind === 'TP' ? 1 : -1);
         const value = unit === 'price' ? price : unit === 'percent' ? move / entry * leverage * 100 : move * exitQuantity(kind);
-        text = String(Number(value.toPrecision(12)));
+        text = unit === 'price' && !(value > 0) ? '' : typed(unit)(String(Number(value.toPrecision(12))));
       }
     } catch { text = ''; }
     units[kind] = unit;
@@ -185,7 +187,7 @@
     <span class="dim">Entry price</span><span>{entry ? fmtPx(entry, d) : '—'}</span>
     <span class="dim">Mark price</span><span data-testid="position-tpsl-mark" data-price={Number.isFinite(mark) && mark > 0 ? mark : undefined}>{Number.isFinite(mark) && mark > 0 ? fmtPx(mark, d) : '—'}</span>
   </div>
-  <Field label="Size" bind:value={amount} testid="position-tpsl-size" placeholder="Whole position">
+  <Field label="Size" bind:value={amount} cut={(v) => cutSz(v, d)} testid="position-tpsl-size" placeholder="Whole position">
     {#snippet suffix()}{symOf(coin)}{/snippet}
   </Field>
   {#each kinds as kind, i}
@@ -194,7 +196,7 @@
       <div class="unit"><h4 class:buy={kind === 'TP'} class:sell={kind === 'SL'}>{kind === 'TP' ? 'Take Profit' : 'Stop Loss'}</h4>
         <Menu ariaLabel={`${kind} input mode`} testid={`position-${kind.toLowerCase()}-unit`} value={units[kind]} options={inputModes} onpick={(value) => changeUnit(kind, value as Unit)} />
       </div>
-      <Field label={units[kind] === 'price' ? 'Trigger price' : units[kind] === 'percent' ? 'Return on margin' : kind === 'TP' ? 'Profit' : 'Loss'} short={units[kind] === 'price' ? 'Price' : units[kind] === 'percent' ? 'ROE' : undefined} bind:value={() => kind === 'TP' ? tp : sl, (v) => { if (kind === 'TP') tp = v; else sl = v; }} testid={`position-${kind.toLowerCase()}`} placeholder={orders[i].length ? 'Unchanged' : 'Not set'}>
+      <Field label={units[kind] === 'price' ? 'Trigger price' : units[kind] === 'percent' ? 'Return on margin' : kind === 'TP' ? 'Profit' : 'Loss'} short={units[kind] === 'price' ? 'Price' : units[kind] === 'percent' ? 'ROE' : undefined} bind:value={() => kind === 'TP' ? tp : sl, (v) => { if (kind === 'TP') tp = v; else sl = v; }} cut={typed(units[kind])} testid={`position-${kind.toLowerCase()}`} placeholder={orders[i].length ? 'Unchanged' : 'Not set'}>
         {#snippet suffix()}{units[kind] === 'percent' ? '%' : quote}{/snippet}
       </Field>
       {#if est}<div class="estimate" data-testid={`position-${kind.toLowerCase()}-estimate`}>

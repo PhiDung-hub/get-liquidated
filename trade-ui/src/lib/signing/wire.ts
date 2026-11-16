@@ -33,6 +33,31 @@ export function roundPx(px: number, t: Tick, isBuy: boolean): number {
   return priceDecimals(out, t) < d ? roundPx(out, t, isBuy) : out;
 }
 
+/**
+ * Typed text kept to a number Hyperliquid can take, as it is typed: digits and one "." (a "," from a comma keypad reads as
+ * "."), at most `decimals` places, and a leading "-" only when `signed`. Nothing else reaches the box.
+ */
+export function cutDecimals(text: string, decimals: number, signed = false): string {
+  const t = text.replace(',', '.');
+  const sign = signed && t.trimStart().startsWith('-') ? '-' : '';
+  const [whole, frac] = t.replace(/[^\d.]/g, '').split('.');
+  return sign + (frac !== undefined && decimals > 0 ? `${whole}.${frac.slice(0, decimals)}` : whole);
+}
+
+/** Typed price text cut to the tick rule: 5 significant figures and at most maxDecimals places; integers always pass. */
+export function cutPx(text: string, t: Tick | undefined): string {
+  const most = t ? maxDecimals(t) : 8;
+  const v = cutDecimals(text, most);
+  const m = /^(\d*)\.(\d*)$/.exec(v);
+  if (!m || !t) return v;
+  const whole = m[1].replace(/^0+/, '');
+  const sig = whole ? 5 - whole.length : 5 + /^0*/.exec(m[2])![0].length;
+  return cutDecimals(v, Math.max(0, Math.min(most, sig)));
+}
+
+/** Typed size text cut to the market's szDecimals (8 places until the market list has loaded). */
+export const cutSz = (text: string, szDecimals: number | undefined) => cutDecimals(text, szDecimals ?? 8);
+
 export function roundSz(sz: number, szDecimals: number): number {
   const f = 10 ** szDecimals;
   return snap(Math.floor(sz * f + 1e-9) / f, szDecimals);

@@ -9,7 +9,7 @@
   import { market } from '$lib/market/market.svelte';
   import { closePart } from '$lib/orders/execute';
   import type { Tif } from '$lib/exchange/actions';
-  import { MIN_NOTIONAL, roundPx, roundSz } from '$lib/signing/wire';
+  import { MIN_NOTIONAL, cutPx, cutSz, roundPx, roundSz } from '$lib/signing/wire';
   import { fmtSz, fmtUsd } from '$lib/util/format';
   import { toast } from '$lib/ui/toast.svelte';
   import { ARMING, arming, ui } from '$lib/ui/state.svelte';
@@ -125,7 +125,7 @@
   <button class="x" aria-label="Close" disabled={busy} onclick={close}>✕</button>
   <h3 data-testid="close-title">{limit ? 'Limit' : 'Market'} Close · <Coin {coin} /> <span class:buy={long} class:sell={!long}>{long ? 'long' : 'short'}</span> {fmtSz(held, d)}</h3>
   {#if limit}
-    <Field label="Price" bind:value={pxText} testid="close-price" placeholder="0">
+    <Field label="Price" bind:value={pxText} cut={(v) => cutPx(v, t)} testid="close-price" placeholder="0">
       {#snippet suffix()}
         <button class="pick" data-testid="close-mid" onclick={setPx(mid)}>Mid</button>
         {#if tif === 'Alo'}<button class="pick" data-testid="close-best" title="Best maker price: the {long ? 'ask' : 'bid'}" onclick={setPx(best)}>Best</button>{/if}
@@ -133,7 +133,7 @@
       {/snippet}
     </Field>
   {/if}
-  <Field label="Size" bind:value={sizeText} testid="close-size" placeholder="0">
+  <Field label="Size" bind:value={sizeText} cut={(v) => cutSz(v, d)} testid="close-size" placeholder="0">
     {#snippet suffix()}{symOf(coin)}{/snippet}
   </Field>
   <SizeSlider id="close" bind:pct onpct={setPct} />

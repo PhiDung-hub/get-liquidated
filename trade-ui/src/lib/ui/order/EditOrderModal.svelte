@@ -17,7 +17,7 @@
   import { asset, symOf } from '$lib/market/meta.svelte';
   import { watchBbo } from '$lib/market/book.svelte';
   import { minLabel, moveOrder, quoteIn, spotGrowth } from '$lib/orders/execute';
-  import { MIN_NOTIONAL, roundPx, roundSz } from '$lib/signing/wire';
+  import { MIN_NOTIONAL, cutPx, cutSz, roundPx, roundSz } from '$lib/signing/wire';
   import { fmtIn, fmtPx, fmtSz } from '$lib/util/format';
   import { toast } from '$lib/ui/toast.svelte';
   import Coin from '../Coin.svelte';
@@ -95,8 +95,8 @@
 <div class="modal" role="dialog" data-sheet aria-label="Edit order" data-testid="edit-modal">
   <button class="x" aria-label="Close" onclick={close}>✕</button>
   <h3>Edit · <Coin {coin} /> <span class:buy={isBuy} class:sell={!isBuy}>{isBuy ? 'Buy' : 'Sell'}</span> <span class="dim">{first.tif}{first.reduceOnly ? ' · reduce-only' : ''}</span></h3>
-  <Field label="Price" bind:value={pxText} testid="edit-price" placeholder="0" />
-  <Field label="Size" bind:value={sizeText} testid="edit-size" placeholder="0">
+  <Field label="Price" bind:value={pxText} cut={(v) => cutPx(v, t)} testid="edit-price" placeholder="0" />
+  <Field label="Size" bind:value={sizeText} cut={(v) => cutSz(v, d)} testid="edit-size" placeholder="0">
     {#snippet suffix()}{symOf(coin)}{/snippet}
   </Field>
   <p class="dim">Was {fmtSz(first.sz, d)} at {fmtPx(first.limitPx, d, t.spot)}. Same side, TIF and reduce-only; one modify, nothing sent before Confirm.</p>

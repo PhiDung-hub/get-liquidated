@@ -7,6 +7,7 @@
   import { socket } from '$lib/transport/ws.svelte';
   import { viewAddress } from '$lib/session/session.svelte';
   import { adjustMargin } from '$lib/orders/execute';
+  import { cutDecimals } from '$lib/signing/wire';
   import { fmtPx, fmtUsd } from '$lib/util/format';
   import { ui } from '$lib/ui/state.svelte';
   import Coin from '../Coin.svelte';
@@ -87,7 +88,7 @@
     <div class="liq"><span class="dim">Est. liq. price</span> <span data-testid="margin-liq">{px(p?.liqPx ?? null)} → {px(liq)}</span></div>
   </div>
   <label class="ui-field box">
-    <input inputmode="decimal" placeholder="Amount" aria-label="amount" data-testid="margin-amount" bind:value={amount} />
+    <input inputmode="decimal" autocomplete="off" placeholder="Amount" aria-label="amount" data-testid="margin-amount" value={amount} oninput={(e) => (e.currentTarget.value = amount = cutDecimals(e.currentTarget.value, 6))} />
     <span class="dim">USDC</span>
     <button class="max" data-testid="margin-max" disabled={max === null} onclick={() => (amount = max!.toFixed(2))}>Max</button>
   </label>

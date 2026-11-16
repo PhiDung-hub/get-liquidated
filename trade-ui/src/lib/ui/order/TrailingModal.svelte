@@ -8,7 +8,7 @@
   import { markOf } from '$lib/orders/size';
   import { closing } from '$lib/orders/ticket.svelte';
   import { viewAddress } from '$lib/session/session.svelte';
-  import { MIN_NOTIONAL, priceDecimals, roundPx, roundSz } from '$lib/signing/wire';
+  import { MIN_NOTIONAL, cutDecimals, cutPx, maxDecimals, priceDecimals, roundPx, roundSz } from '$lib/signing/wire';
   import { net } from '$lib/transport/network';
   import { fmtPx, fmtSz, fmtUsd } from '$lib/util/format';
   import { ARMING, arming, ui } from '$lib/ui/state.svelte';
@@ -101,7 +101,7 @@
 <div class="modal" role="dialog" data-sheet aria-label="Trailing Stop" data-testid="trailing-modal">
   <button class="x" aria-label="Close" disabled={busy} onclick={close}>✕</button>
   <h3 data-testid="trailing-title">Trailing Stop · <Coin {coin} /> <span class:buy={long} class:sell={!long}>{long ? 'long' : 'short'}</span> {fmtSz(held, d)}</h3>
-  <Field label="Retracement" bind:value={retraceText} testid="trailing-retracement" placeholder="0">
+  <Field label="Retracement" bind:value={retraceText} cut={(v) => cutDecimals(v, unit === 'pct' ? 2 : mark > 0 ? priceDecimals(mark, t) : maxDecimals(t))} testid="trailing-retracement" placeholder="0">
     {#snippet suffix()}
       <button class="pick" aria-pressed={unit === 'pct'} data-testid="trailing-unit-pct" onclick={(e) => setUnit(e, 'pct')}>%</button>
       <button class="pick" aria-pressed={unit === 'px'} data-testid="trailing-unit-px" onclick={(e) => setUnit(e, 'px')}>{quote}</button>
@@ -114,7 +114,7 @@
       {/each}
     </div>
   {/if}
-  <Field label="Activation price (optional)" short="Activation" bind:value={activationText} testid="trailing-activation" placeholder="At once" />
+  <Field label="Activation price (optional)" short="Activation" bind:value={activationText} cut={(v) => cutPx(v, t)} testid="trailing-activation" placeholder="At once" />
   <div class="chips">
     {#each [25, 50, 75, 100] as v (v)}
       <button aria-pressed={pct === v} data-testid="trailing-size-{v}" onclick={(e) => ((e.currentTarget as HTMLElement).blur(), (pct = v))}>{v}%</button>

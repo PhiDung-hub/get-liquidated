@@ -5,7 +5,8 @@
   import { settings, persist, exportJson, importJson, resetSettings, DEFAULTS, RANGES, type Binding, type HotkeyType, type SizeUnit } from '$lib/settings/settings.svelte';
   import { THEMES } from '$lib/settings/themes';
   import { market } from '$lib/market/market.svelte';
-  import { symOf } from '$lib/market/meta.svelte';
+  import { meta, symOf } from '$lib/market/meta.svelte';
+  import { cutDecimals, cutSz } from '$lib/signing/wire';
   import { ui, type SettingsTab } from '$lib/ui/state.svelte';
   import { session } from '$lib/session/session.svelte';
   import Integrations from '$lib/ui/Integrations.svelte';
@@ -130,6 +131,11 @@
     return [buy, mod && sell.startsWith(mod) ? sell.slice(mod.length) : sell];
   }
   const keysOf = (id: ActionId) => (bindingsFor(id).map(keyLabel).join(' / ') || '—') + (ACTIONS.find((a) => a.id === id)?.double ? ' twice' : '');
+  /** A coin size follows that coin's szDecimals, as on the ticket; USD and % keep 2 places. */
+  const typeHotkeySize = (t: HotkeyType, v: string) => {
+    const s = settings.hotkeySizes[t];
+    return s.unit === 'coin' ? cutSz(v, meta.byName.get(s.coin ?? '')?.szDecimals) : cutDecimals(v, 2);
+  };
   const modeOf = (t: HotkeyType) => {
     const s = settings.hotkeySizes[t];
     return s.unit === 'pct' ? `pct-${s.basis}` : s.unit === 'coin' ? `coin:${s.coin}` : s.unit;
@@ -187,7 +193,7 @@
             <div class="hk" data-testid="hotkey-size-{r.t}">
               <span class="keys"><span class="buy">{buy}</span> / <span class="sell">{sell}</span></span>
               <span>{r.label}</span>
-              <input type="number" {...bound(`hotkeySizes.${r.t}.value`)} step="any" aria-label="{r.label} size" bind:value={settings.hotkeySizes[r.t].value} />
+              <input inputmode="decimal" autocomplete="off" aria-label="{r.label} size" value={settings.hotkeySizes[r.t].value} oninput={(e) => (settings.hotkeySizes[r.t].value = Number((e.currentTarget.value = typeHotkeySize(r.t, e.currentTarget.value))))} />
               <select aria-label="{r.label} size unit" value={modeOf(r.t)} onchange={(e) => setMode(r.t, e.currentTarget.value)}>
                 <option value="usd">USD</option>
                 {#each coinsOf(r.t) as c (c)}<option value="coin:{c}">{symOf(c)}</option>{/each}

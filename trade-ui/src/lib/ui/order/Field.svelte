@@ -1,9 +1,13 @@
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte';
 
-  let { label, short, value = $bindable(), testid, ariaLabel, placeholder, readonly = false, inputmode = 'decimal', suffix }: {
-    label: string; short?: string; value: string; testid?: string; ariaLabel?: string; placeholder?: string; readonly?: boolean; inputmode?: 'decimal' | 'numeric'; suffix?: Snippet;
-  } = $props();
+  let { label, short, value = $bindable(), testid, ariaLabel, placeholder, readonly = false, inputmode = 'decimal', cut = (t: string) => t, suffix }: {
+    label: string; short?: string; value: string; testid?: string; ariaLabel?: string; placeholder?: string; inputmode?: 'decimal' | 'numeric'; suffix?: Snippet;
+  } & (
+    | { readonly: true; cut?: never }
+    /** What an editable box may hold, applied as each key lands: Hyperliquid's precision (see signing/wire.ts), never free text. */
+    | { readonly?: false; cut: (typed: string) => string }
+  ) = $props();
 
   // A number still being typed ("-", "." or "1.") stays on screen while it reads as the value the parent kept; anything else the parent changed replaces it.
   const num = (t: string) => Number(/^\s*-?\.?\s*$/.test(t) ? 0 : t);
@@ -14,7 +18,7 @@
     untrack(() => same(text, v) || (text = v));
   });
   function typed(e: Event & { currentTarget: HTMLInputElement }) {
-    const t = e.currentTarget.value;
+    const t = cut(e.currentTarget.value);
     value = t;
     text = same(t, value) ? t : value;
     if (e.currentTarget.value !== text) e.currentTarget.value = text;

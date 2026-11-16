@@ -34,7 +34,7 @@
   import { assertPositionsLoaded, minLabel, place, precheck, quoteIn, readable } from '$lib/orders/execute';
   import { startChase, capFromPct } from '$lib/orders/chase.svelte';
   import type { Grouping, Tif } from '$lib/exchange/actions';
-  import { MIN_NOTIONAL, roundPx } from '$lib/signing/wire';
+  import { MIN_NOTIONAL, cutDecimals, cutPx, cutSz, roundPx } from '$lib/signing/wire';
   import { fmtIn, fmtNum, fmtPx, fmtSz } from '$lib/util/format';
   import { placing, ticket, type TicketKind } from '$lib/orders/ticket.svelte';
   import { toast } from '$lib/ui/toast.svelte';
@@ -235,21 +235,13 @@
   }
   const capShown = $derived(tryOr(capPct, settings.chase.capPct));
 
-  /** Coin sizes are cut to szDecimals as typed; the getter hands the cut text back to the input. */
-  const cut = (v: string, d: number | undefined) => (d === undefined ? v : d ? v.replace(new RegExp(`^(\\d*\\.\\d{${d}})\\d+$`), '$1') : v.split('.')[0]);
-  /** Prices are cut as typed to what Hyperliquid accepts: 5 significant figures and 6 - szDecimals decimals (8 - szDecimals on spot). */
-  const cutPx = (v: string) => {
-    const m = /^(\d*)\.(\d+)$/.exec(v);
-    if (!m || szDecimals === undefined) return v;
-    const whole = m[1].replace(/^0+/, '');
-    const sig = whole ? 5 - whole.length : 5 + /^0*/.exec(m[2])![0].length;
-    return cut(v, Math.max(0, Math.min((spot ? 8 : 6) - szDecimals, sig)));
-  };
-  function typeSize(typed: string) {
-    // A comma-decimal keypad has no "."; read as nothing, "0,5" would clear the box and the next 5 would make it 5.
-    const text = typed.replace(',', '.');
-    // Before the market list lands the decimals are unknown, so nothing is cut.
-    const v = unit === 'coin' ? cut(text, szDecimals) : text;
+  // Every box is cut to what Hyperliquid accepts as it is typed (signing/wire.ts); quote amounts and percentages keep 2 places.
+  const typePx = (v: string) => cutPx(v, meta.byName.get(coin));
+  const typeSz = (v: string) => (unit === 'coin' ? cutSz(v, szDecimals) : cutDecimals(v, 2));
+  const typeAmt = (v: string) => cutDecimals(v, 2);
+  const typeGain = (v: string) => cutDecimals(v, 2, true);
+  const typeCount = (v: string) => cutDecimals(v, 0);
+  function typeSize(v: string) {
     sizeText = v;
     const n = Number(v);
     Object.assign(ticket, { unit, size: Number.isFinite(n) && n > 0 ? n : 0 });
@@ -416,8 +408,8 @@
 
 {#snippet leg(k: Leg, label: string, short: string, aria: string, gainLabel: string, gainAria: string, placeholder: string)}
   <div class="two leg">
-    <Field {label} {short} bind:value={() => ticket[k], (v) => (ticket[k] = v)} ariaLabel={aria} {placeholder} inputmode="decimal" />
-    <Field label={gainLabel} bind:value={() => gainShown(k), (v) => setGain(k, v)} ariaLabel={gainAria} placeholder={gainLabel} inputmode="decimal">
+    <Field {label} {short} bind:value={() => ticket[k], (v) => (ticket[k] = v)} cut={typePx} ariaLabel={aria} {placeholder} inputmode="decimal" />
+    <Field label={gainLabel} bind:value={() => gainShown(k), (v) => setGain(k, v)} cut={typeGain} ariaLabel={gainAria} placeholder={gainLabel} inputmode="decimal">
       {#snippet suffix()}
         <Menu
           testid="panel-{k}-unit" ariaLabel="{gainLabel} unit" align="right" value={legs[k].unit} onpick={(v) => pickGainUnit(k, v)}
@@ -458,14 +450,14 @@
       </div>
     {/if}
     {#if isTrigger(kind)}
-      <Field label="Trigger Price ({quote})" bind:value={() => ticket.trigger, (v) => (ticket.trigger = cutPx(v))} testid="panel-trigger" inputmode="decimal" />
+      <Field label="Trigger Price ({quote})" bind:value={ticket.trigger} cut={typePx} testid="panel-trigger" inputmode="decimal" />
     {/if}
     {#if priced}
-      <Field label="Price ({quote})" short="Price" bind:value={() => ticket.px, (v) => (ticket.px = cutPx(v))} testid="panel-px" inputmode="decimal">
+      <Field label="Price ({quote})" short="Price" bind:value={ticket.px} cut={typePx} testid="panel-px" inputmode="decimal">
         {#snippet suffix()}<button class="mid" data-testid="panel-mid" onclick={mid}>Mid</button>{#if kind === 'limit' && ticket.tif === 'Alo'}<button class="mid" data-testid="panel-best" title="Best maker price: the {ticket.isBuy ? 'bid' : 'ask'}" onclick={best}>Best</button>{/if}{/snippet}
       </Field>
     {/if}
-    <div class="size-field"><Field label={kind !== 'scale' ? 'Size' : 'Total size'} short={kind === 'scale' ? 'Total' : undefined} bind:value={() => sizeShown, typeSize} testid="panel-size" inputmode="decimal">
+    <div class="size-field"><Field label={kind !== 'scale' ? 'Size' : 'Total size'} short={kind === 'scale' ? 'Total' : undefined} bind:value={() => sizeShown, typeSize} cut={typeSz} testid="panel-size" inputmode="decimal">
       {#snippet suffix()}
         <Menu
           testid="panel-unit" ariaLabel="size unit" align="right" value={unit} onpick={pickUnit} dropdown
@@ -477,12 +469,12 @@
     {#if !ticket.reduceOnly && maxSz > 0 && sz > maxSz * 1.0001}<p class="warn" data-testid="panel-max">Max {fmtSz(maxSz, szDecimals)} {spot ? base : symOf(coin)}{spot ? '' : ` at ${levX}x`}</p>{/if}
 
     {#if kind === 'scale'}
-      <Field label="Start ({quote})" short="Start" bind:value={scaleFrom} placeholder={defRange.from > 0 ? fmtPx(defRange.from, szDec, spot) : undefined} testid="panel-scale-start" inputmode="decimal" />
-      <Field label="End ({quote})" short="End" bind:value={scaleTo} placeholder={defRange.to > 0 ? fmtPx(defRange.to, szDec, spot) : undefined} testid="panel-scale-end" inputmode="decimal" />
+      <Field label="Start ({quote})" short="Start" bind:value={scaleFrom} cut={typePx} placeholder={defRange.from > 0 ? fmtPx(defRange.from, szDec, spot) : undefined} testid="panel-scale-start" inputmode="decimal" />
+      <Field label="End ({quote})" short="End" bind:value={scaleTo} cut={typePx} placeholder={defRange.to > 0 ? fmtPx(defRange.to, szDec, spot) : undefined} testid="panel-scale-end" inputmode="decimal" />
       <div class="form">
         <div class="two scale-options">
-          <Field label="Total Orders" short="Orders" bind:value={ticket.scaleCount} ariaLabel="Total orders" inputmode="numeric" />
-          <Field label="Size Skew" short="Skew" bind:value={ticket.scaleSkew} ariaLabel="Size skew" inputmode="decimal" />
+          <Field label="Total Orders" short="Orders" bind:value={ticket.scaleCount} cut={typeCount} ariaLabel="Total orders" inputmode="numeric" />
+          <Field label="Size Skew" short="Skew" bind:value={ticket.scaleSkew} cut={typeAmt} ariaLabel="Size skew" inputmode="decimal" />
         </div>
         {#if perOrder}
           <p class="dim" data-testid="scale-each">{perOrder.n} orders · ≈ {fmtNum(perOrder.sz, szDec)} {symOf(coin)} ({quoteIn(coin) === 'USDC' ? '$' : ''}{fmtNum(perOrder.usd, perOrder.usd < 100 ? 2 : 0)}{quoteIn(coin) === 'USDC' ? '' : ` ${quoteIn(coin)}`}) each</p>
@@ -517,7 +509,7 @@
     {/if}
     {#if kind === 'chase'}
       <div class="opt">{@render check('Max Chase Distance', capOn, (v) => (capOn = v), 'panel-chase-cap')}</div>
-      {#if capOn}<Field label="Distance (%)" bind:value={capText} testid="panel-chase-distance" inputmode="decimal" />{/if}
+      {#if capOn}<Field label="Distance (%)" bind:value={capText} cut={typeAmt} testid="panel-chase-distance" inputmode="decimal" />{/if}
       <p class="dim" data-testid="panel-chase-note">
         Cap {capShown}% · timeout {settings.chase.timeoutSec ? `${settings.chase.timeoutSec}s` : 'off'} · on stop {settings.chase.onStop === 'rest' ? 'leave resting' : 'market'}
       </p>

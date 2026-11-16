@@ -594,7 +594,7 @@ export async function askSelection(selection: Selection, message: string, contex
   if (!isState({ suggestions: [], marks: [mark], chats: [chat] })) throw new Error('Invalid annotation response');
   agent.marks = [mark, ...agent.marks.filter((m) => m.id !== mark.id)];
   const live = agent.chats.find((c) => c.mark.id === mark.id);
-  if (!live || live.updated <= chat.updated) agent.chats = [chat, ...agent.chats.filter((c) => c.mark.id !== mark.id)].slice(0, 50);
+  if (!live || live.updated < chat.updated || (live.updated === chat.updated && live.messages.length <= chat.messages.length)) agent.chats = [chat, ...agent.chats.filter((c) => c.mark.id !== mark.id)].slice(0, 50);
   return mark;
 }
 

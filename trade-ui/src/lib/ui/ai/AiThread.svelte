@@ -265,8 +265,6 @@
         <details><summary>Evidence &amp; reasoning summary{row.entry.stage ? ` · ${row.entry.stage.replaceAll('-', ' ')}` : ''}</summary><p class="dim">{row.entry.evidence}</p></details>
       </article></li>
     {/if}
-  {:else}
-    <li class="dim" data-testid="ai-empty">Nothing yet. Ask below, or run /mcp__getliq__mentor in Claude Code.</li>
   {/each}
 </ol>
 {#if pending}
@@ -288,7 +286,7 @@
   {/if}
   <div class="line">
     <textarea data-testid="ai-ask" rows="1" aria-label={session ? 'Prompt' : `Question about ${market.coin}`} bind:this={box} bind:value={composer.draft} placeholder={composer.target ? 'Prompt your running AI…' : `Ask about ${market.coin}…`} maxlength={cap} disabled={!!blocked} title={blocked} onkeydown={keys} onpaste={pasted} oninput={() => (browsing = -1)}></textarea>
-    <button class="send" data-testid="ai-ask-send" {disabled}>{sending ? 'Sending…' : 'Send'}</button>
+    <button class="send" data-testid="ai-ask-send" {disabled} title="Enter sends · Shift+Enter adds a line · ↑ recalls your last message. Your AI can also start: run /mcp__getliq__mentor in Claude Code.">{sending ? 'Sending…' : 'Send'}</button>
   </div>
   <div class="foot">
   <input type="file" multiple hidden accept="image/*,text/*,.md,.csv,.json,.log" data-testid="ai-attach-file" bind:this={picker} onchange={picked} />
@@ -307,8 +305,7 @@
   {:else if composer.draft.length > cap}<p class="warn">{composer.draft.length} / {cap} characters. Shorten it to send.</p>
   {:else if failed}<p class="warn">Remove the attachment that failed, then send.</p>
   {:else if uploading}<p class="dim">Uploading…</p>
-  {:else if waiting}<p class="dim">Awaiting a reply. Check the local terminal for approvals.</p>
-  {:else}<p class="dim hints">⏎ send · ⇧⏎ newline · ↑ last</p>{/if}
+  {:else if waiting}<p class="dim">Awaiting a reply. Check the local terminal for approvals.</p>{/if}
   </div>
 </form>
 
@@ -333,10 +330,9 @@
   .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .foot p { flex: 1 1 12ch; min-width: 0; }
   .line { display: flex; align-items: flex-end; gap: 8px; }
-  textarea { flex: 1; min-width: 0; box-sizing: border-box; resize: none; max-height: min(8lh, 25vh); overflow-y: auto; }
+  textarea { flex: 1; min-width: 0; box-sizing: border-box; resize: none; min-height: calc(3lh + 12px); max-height: min(8lh, 25vh); overflow-y: auto; }
   select { flex: 0 1 auto; min-width: 0; max-width: 55%; }
   .send { height: var(--ctl); padding: 0 14px; background: var(--accent); color: var(--bg); }
-  .hints { font-size: max(8px, calc(var(--fs) * 0.917)); }
   .dim { color: var(--dim); }
   .warn { color: var(--warn); }
   .err { color: var(--sell); }

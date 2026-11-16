@@ -78,6 +78,21 @@
     <div class="head">
       <span title="Your own AI (Claude Code, Codex or another MCP client) is paired with this browser">AI co-pilot <span class="dim">· MCP</span></span>
       <span class="state" class:live={agent.status === 'live'} data-testid="ai-status">{agent.status === 'live' ? 'Workspace live' : 'reconnecting…'}</span>
+      {#if update || companion.waiting}
+        <span class="note" data-testid="ai-notices" tabindex="0" role="button" aria-label="Notices">!
+          <span class="tip"><span class="tipbox">
+            {#if update === 'restart'}
+              <p class="warn" data-testid="ai-update">getliq {CONNECTOR_VERSION} is installed. If this stays, restart Claude Code or Codex to load it.</p>
+            {:else if update}
+              <p class="warn" data-testid="ai-update">getliq {CONNECTOR_VERSION} is out{companion.version && companion.version !== CONNECTOR_VERSION ? `; this computer runs ${companion.version}` : ''}.
+                {#if update === 'update'}<button data-testid="ai-update-now" disabled={companion.updating} onclick={tap(updateConnector)}>{companion.updating ? 'Updating…' : 'Update'}</button>
+                {:else}<button data-testid="ai-update-copy" onclick={tap(copySetup)}>{copied === 'ok' ? 'Copied · run it in a terminal' : 'Copy update command'}</button>{/if}
+              </p>
+            {/if}
+            {#if companion.waiting}<p class="dim" data-testid="ai-permission-hint">Allow access to apps on this device (Chrome/Edge) or local network access (Firefox).</p>{/if}
+          </span></span>
+        </span>
+      {/if}
       <button data-testid="ai-gear" aria-label="Co-pilot settings" aria-expanded={gearOpen} bind:this={gear} onclick={() => (gearOpen = !gearOpen)} onkeydown={(e) => e.key === 'Escape' && gearOpen && (e.stopPropagation(), (gearOpen = false))}>⚙</button>
     </div>
     {#if gearOpen}
@@ -93,18 +108,11 @@
         <p class="dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={pick(openCoach)}>Chart coach</button> · <button data-testid="ai-signout" onclick={pick(signOut)}>Sign out</button></p>
       </div>
     {/if}
-    {#if update === 'restart'}
-      <p class="warn" data-testid="ai-update">getliq {CONNECTOR_VERSION} is installed. If this stays, restart Claude Code or Codex to load it.</p>
-    {:else if update}
-      <p class="warn" data-testid="ai-update">getliq {CONNECTOR_VERSION} is out{companion.version && companion.version !== CONNECTOR_VERSION ? `; this computer runs ${companion.version}` : ''}.
-        {#if update === 'update'}<button data-testid="ai-update-now" disabled={companion.updating} onclick={tap(updateConnector)}>{companion.updating ? 'Updating…' : 'Update'}</button>
-        {:else}<button data-testid="ai-update-copy" onclick={tap(copySetup)}>{copied === 'ok' ? 'Copied · run it in a terminal' : 'Copy update command'}</button>{/if}
-      </p>
-    {/if}
+    <AiThread />
     {#if companion.updateError}<p class="err" data-testid="ai-update-error" title={companion.updateError}>Update failed. <button data-testid="ai-update-fallback" onclick={tap(copySetup)}>{copied === 'ok' ? 'Copied · run it in a terminal' : 'Copy the command instead'}</button></p>{/if}
     {#if agent.answerer?.error}<p class="err" data-testid="ai-answerer-error">{agent.answerer.error}</p>{/if}
-    {@render notices()}
-    <AiThread />
+    {#if agent.error}<p class="err" data-testid="ai-error">{agent.error}</p>{/if}
+    {#if agent.error && (agent.status === 'offline' || companion.retryPair)}<button class="open" data-testid="ai-retry" onclick={tap(retryNow)}>Retry</button>{/if}
   {:else if agent.status === 'offline'}
     <p class="dim" data-testid="ai-connecting">Reconnecting to your co-pilot… Keep your AI client running on this computer.</p>
   {:else}
@@ -162,6 +170,12 @@
   .pair label { flex-direction: column; align-items: stretch; gap: 4px; }
   .head { display: flex; align-items: center; gap: 8px; color: var(--bright); }
   .head > span:first-child { flex: 1; min-width: 0; }
+  .note { color: var(--warn); font-weight: 700; padding: 0 6px; cursor: help; }
+  .tip { display: none; position: absolute; z-index: 6; left: 10px; right: 10px; top: 30px; padding-top: 8px; font-weight: 400; cursor: auto; }
+  .tipbox { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+  .head .tip button { padding: 2px 8px; color: var(--accent); font-size: inherit; line-height: inherit; }
+  .tip { font-size: var(--fs); }
+  .note:hover .tip, .note:focus-within .tip, .note:focus .tip { display: block; }
   .head button { padding: 0 6px; color: var(--dim); font-size: calc(var(--fs) * 1.35); line-height: 1.2; }
   .state { color: var(--warn); font-size: max(8px, calc(var(--fs) * 0.917)); }
   .state.live { color: var(--buy); }

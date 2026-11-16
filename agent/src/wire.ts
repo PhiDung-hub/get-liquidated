@@ -153,6 +153,8 @@ const sourceTools = z.array(z.string().regex(/^(\*|[A-Za-z0-9_-]{1,64})$/)).min(
 const secrets = z.record(z.string().min(1).max(200), z.string().max(4000)).default({});
 /** ~/.getliq/answerer.json, written by hand in a terminal: the only way the answerer gets web access or the user's own MCP servers. Names carry no underscore, so mcp__<name>__ prefixes cannot collide. */
 export const answererConfig = z.object({
+  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$/).optional(),
+  budget: z.number().min(0.1).max(50).default(2),
   web: z.union([z.boolean(), z.array(z.string().regex(/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/)).min(1).max(32)]).default(false),
   sources: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).refine((name) => name !== 'getliq', 'getliq is reserved'), z.union([
     z.object({ command: z.string().min(1).max(1000), args: z.array(z.string().max(4000)).max(64).default([]), env: secrets, tools: sourceTools }).strict(),

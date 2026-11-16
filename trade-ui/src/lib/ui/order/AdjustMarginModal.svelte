@@ -53,6 +53,7 @@
     return p.liqPx - delta / (Math.abs(p.szi) * (Math.sign(p.szi) - r));
   });
   const px = (x: number | null) => (x && x > 0 ? fmtPx(x, a.szDecimals) : '—');
+  const dist = (x: number | null) => (p && x && x > 0 && p.szi ? `${((Math.abs(x - p.positionValue / Math.abs(p.szi)) / (p.positionValue / Math.abs(p.szi))) * 100).toFixed(2)}%` : '—');
 
   function pick(e: MouseEvent, t: 'add' | 'remove') {
     (e.currentTarget as HTMLElement).blur();
@@ -89,6 +90,7 @@
   <div class="rows">
     <div><span>Margin</span><span><span data-testid="margin-current">{fmtUsd(p?.marginUsed ?? NaN)}</span>{#if next !== null} → <span class:up={tab === 'add'} class:down={tab === 'remove'} data-testid="margin-next">{fmtUsd(next)}</span>{/if}</span></div>
     <div><span>Liq. price</span><span data-testid="margin-liq">{px(p?.liqPx ?? null)} → {px(liq)}</span></div>
+    <div><span title="How far the mark price is from the liquidation price">Liq. distance</span><span data-testid="margin-liq-dist">{dist(p?.liqPx ?? null)} → {dist(liq)}</span></div>
     <div>
       <span title={tab === 'add' ? 'Available to trade on this side' : 'Margin less max(value ÷ leverage, 10% of value), which HL keeps in the position'}>
         Max {tab === 'add' ? 'to add' : 'to remove'}

@@ -40,7 +40,7 @@
   import { agent, annotationChat, askBlocked, noAi, type Selection } from '$lib/agent/agent.svelte';
   import AiPanel from '$lib/ui/ai/AiPanel.svelte';
   import AnnotationChat from './ai/AnnotationChat.svelte';
-  import { coach, demoLevels, loadDemo, showCoach } from './ai/setups.svelte';
+  import { coach, demoLevels, showCoach } from './ai/setups.svelte';
   import { collectSelection } from './chart/selection';
   import { fillHover, fillMarkers } from './chart/fillMarkers.svelte';
   import { DEFS, inputsText, plotName, plotStyle, type Study } from '$lib/market/studies';
@@ -506,15 +506,15 @@
     };
   });
 
-  /** Puts the last candle at 2/3 of the width; false before it has a place on the time scale. */
-  function leaveThird() {
+  /** Puts the last candle at 2/3 of the width, across that many bars when given; false before it has a place on the time scale. */
+  function leaveThird(across = 0) {
     const ts = chart!.timeScale();
     const range = ts.getVisibleLogicalRange();
     const latest = bars.at(-1);
     const x = latest ? ts.timeToCoordinate((latest.time / 1000) as UTCTimestamp) : null;
     const last = x === null ? null : ts.coordinateToLogical(x);
     if (!range || last === null) return false;
-    const span = range.to - range.from;
+    const span = across || range.to - range.from;
     const to = last + span / 3;
     if (Math.abs(to - range.to) > 0.5) ts.setVisibleLogicalRange({ from: to - span, to });
     return true;
@@ -526,7 +526,8 @@
     if (cmd === 'reset') {
       resetShown = false;
       chart!.priceScale('right').setAutoScale(true);
-      held = leaveThird();
+      // 6 px a bar is the zoom the chart opens at.
+      held = leaveThird(ts.width() / 6);
       if (!held) ts.scrollToRealTime();
       return void readRanges();
     }
@@ -1171,7 +1172,7 @@
         <button class:on={inZen()} data-testid="zen-toggle" title="Zen mode: chart only ({keys('zen')}, Esc exits)" aria-label="Zen mode" onclick={(e) => (e.currentTarget.blur(), setZen(!inZen()))}><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 4h16v16H4zM4 13h7v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       {/if}
     </span>
-    {#if !noAi()}<button class="coach-launch" class:on={coach.open} data-testid="chart-ai" data-status={agent.status} aria-label="AI setups and guidance" aria-expanded={coach.open} onclick={(e) => { e.currentTarget.blur(); if (coach.open) coach.open = false; else { showCoach(agent.address ? 'live' : 'demo'); if (!agent.address && !coach.demo) loadDemo('vwap'); } }}>AI{#if coachCount}<span>{coachCount}</span>{/if}</button>{/if}
+    {#if !noAi()}<button class="coach-launch" class:on={coach.open} data-testid="chart-ai" data-status={agent.status} aria-label="AI setups and guidance" aria-expanded={coach.open} onclick={(e) => { e.currentTarget.blur(); if (coach.open) coach.open = false; else showCoach(coach.mode); }}>AI{#if coachCount}<span>{coachCount}</span>{/if}</button>{/if}
     <span class="chart-actions"><button data-testid="chart-fullscreen" aria-label={fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart'} aria-pressed={fullscreen} title="Fullscreen chart (Esc exits)" onclick={(e) => { e.currentTarget.blur(); void toggleFullscreen(); }}><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d={fullscreen ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button></span>
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
@@ -1183,7 +1184,7 @@
     {#if railFit > 0 && railFit < railItems.length}{@render moreTools()}{/if}
   </div>
   <div class="chart" bind:this={el} bind:clientWidth={chartWidth} onwheelcapture={() => (resetShown = true)}>
-    <div class="chart-refresh" class:shown={resetShown || away} style:top="{priceH - 28}px" style:left="{axisL + (chartWidth - axisL - axisW) / 2}px">      <button data-testid="chart-reset" title="Reset chart: auto-scale, one-third blank space ({keys('chartReset')})" aria-label="Reset chart" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>⟲</button>
+    <div class="chart-refresh" class:shown={resetShown || away} style:top="{priceH - 28}px" style:left="{axisL + (chartWidth - axisL - axisW) / 2}px">      <button data-testid="chart-reset" title="Reset chart: auto-scale, default zoom, one-third blank space ({keys('chartReset')})" aria-label="Reset chart" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>⟲</button>
 </div>
     {#if retrying}<div class="retrying" data-testid="chart-retrying">retrying…</div>
     {:else if empty || !barCount}<div class="retrying" data-testid="chart-status">{empty ? `No candles for ${nameOf(market.coin)} ${ivLabel(settings.chart.interval)} yet` : `Loading ${nameOf(market.coin)} ${ivLabel(settings.chart.interval)}…`}</div>{/if}

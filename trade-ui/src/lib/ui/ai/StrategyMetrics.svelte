@@ -6,7 +6,7 @@
   import { METHODS, strategyMetrics, type Correlation } from './strategyMetrics';
   import Menu from '../order/Menu.svelte';
 
-  let { bars, interval }: { bars: Bar[]; interval: Interval } = $props();
+  let { bars, interval, picked }: { bars: Bar[]; interval: Interval; picked: string } = $props();
   let horizon = $state(5);
   let now = $state(Date.now());
   $effect(() => { const timer = setInterval(() => now = Date.now(), 30_000); return () => clearInterval(timer); });
@@ -31,7 +31,7 @@
   <div class="horizon"><span>Forward return</span><Menu value={String(horizon)} options={[1, 5, 15].map((n) => ({ value: String(n), label: `Next ${n} bar${n === 1 ? '' : 's'}` }))} onpick={(n) => horizon = Number(n)} testid="metrics-horizon" ariaLabel="Return horizon" align="left" dropdown /></div>
   <div class="scroll"><table>
     <thead><tr><th>Strategy</th><th>Signal ↔ return</th><th>Pairs</th><th>Signals</th></tr></thead>
-    <tbody>{#each result.strategies as item, i}<tr data-testid="strategy-metric-{item.id}"><th title={METHODS[item.id]}>{SETUPS[i].name}</th><td title={item.forward.reason || 'Pearson correlation'}>{r(item.forward)}</td><td>{item.forward.n}</td><td>{item.signals}</td></tr>{/each}</tbody>
+    <tbody>{#each result.strategies as item, i}<tr data-testid="strategy-metric-{item.id}" class:picked={SETUPS[i].id === picked}><th title={METHODS[item.id]}>{SETUPS[i].name}</th><td title={item.forward.reason || 'Pearson correlation'}>{r(item.forward)}</td><td>{item.forward.n}</td><td>{item.signals}</td></tr>{/each}</tbody>
   </table></div>
   {#if result.strategies.some((s) => s.forward.r === null)}<p class="dim" data-testid="metrics-unavailable">— means fewer than 30 pairs, insufficient indicator history or no variation.</p>{/if}
   <strong>Strategy overlap</strong>
@@ -52,6 +52,7 @@
   th:first-child { text-align: left; }
   thead th { color: var(--dim); font-weight: 400; }
   tbody th { font-weight: 400; }
+  tr.picked :is(th, td) { color: var(--accent); font-weight: 700; }
   summary { cursor: pointer; color: var(--dim); }
   details p { margin-top: 8px; }
 </style>

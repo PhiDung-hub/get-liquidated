@@ -7,7 +7,7 @@
   import { meta } from '$lib/market/meta.svelte';
   import { ui } from '$lib/ui/state.svelte';
   import { fmtPx } from '$lib/util/format';
-  import { coach, loadDemo, SETUPS, showCoach, type SetupId } from './setups.svelte';
+  import { coach, loadDemo, pickSetup, SETUPS, showCoach, type SetupId } from './setups.svelte';
   import Menu, { menus } from '../order/Menu.svelte';
   import SuggestionCard from './SuggestionCard.svelte';
 
@@ -16,7 +16,7 @@
   const suggestions = $derived(agent.suggestions.filter((s) => s.coin === market.coin));
   const count = $derived(advice.length + suggestions.length);
   const demo = $derived(coach.demo?.coin === market.coin ? coach.demo : null);
-  const setup = $derived(SETUPS.find((s) => s.id === demo?.setup) ?? SETUPS[0]);
+  const setup = $derived(SETUPS.find((s) => s.id === coach.setup) ?? SETUPS[0]);
   const price = (n: number) => fmtPx(n, meta.byName.get(market.coin)?.szDecimals);
   let now = $state(Date.now());
   $effect(() => { const timer = setInterval(() => now = Date.now(), 15_000); return () => clearInterval(timer); });
@@ -24,10 +24,7 @@
     const coin = market.coin;
     untrack(() => { if (coach.demo && coach.demo.coin !== coin) { coach.demo = null; coach.error = ''; } });
   });
-  function mode(value: 'live' | 'demo' | 'metrics') {
-    showCoach(value);
-    if (value === 'demo' && !demo) loadDemo('vwap');
-  }
+  const mode = showCoach;
   function key(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); coach.open = false; }
@@ -47,18 +44,17 @@
 {#if coach.open && !ui.overlay && !annotationChat.markId && !annotationChat.pending}
   <div class="coach" class:minimized={coach.collapsed} role="dialog" aria-modal="false" aria-label="AI chart coach" tabindex="-1" onkeydown={key} data-testid="chart-coach">
     <header><strong>{coach.collapsed && coach.mode === 'demo' ? 'DEMO' : 'Chart coach'} <span class="dim">· {market.coin}</span></strong><button aria-label={coach.collapsed ? 'Expand chart coach' : 'Minimize chart coach'} aria-expanded={!coach.collapsed} onclick={() => coach.collapsed = !coach.collapsed}>{coach.collapsed ? '+' : '−'}</button><button aria-label="Close chart coach" onclick={() => coach.open = false}>✕</button></header>
+    <div class="picker" hidden={coach.collapsed}><Menu value={setup.id} options={SETUPS.map((s) => ({ value: s.id, label: s.name }))} onpick={(id) => pickSetup(id as SetupId)} testid="coach-setup" ariaLabel="Trading setup" align="left" dropdown /><span class="dim" data-testid="coach-setup-note">{setup.style} · {setup.timeframe}</span></div>
     <nav aria-label="Coach views" hidden={coach.collapsed}>
       <button class="ui-tab" class:on={coach.mode === 'live'} aria-pressed={coach.mode === 'live'} data-testid="coach-live" onclick={() => mode('live')}>Live guidance{count ? ` · ${count}` : ''}</button>
-      <button class="ui-tab" class:on={coach.mode === 'demo'} aria-pressed={coach.mode === 'demo'} data-testid="coach-demo" onclick={() => mode('demo')}>Setup demos</button>
+      <button class="ui-tab" class:on={coach.mode === 'demo'} aria-pressed={coach.mode === 'demo'} data-testid="coach-demo" onclick={() => mode('demo')}>Example</button>
       <button class="ui-tab" class:on={coach.mode === 'metrics'} aria-pressed={coach.mode === 'metrics'} data-testid="coach-metrics" onclick={() => mode('metrics')}>Metrics</button>
     </nav>
     <div class="body" hidden={coach.collapsed}>
       {#if coach.mode === 'metrics'}
-        <StrategyMetrics {bars} {interval} />
+        <StrategyMetrics {bars} {interval} picked={setup.id} />
       {:else if coach.mode === 'demo'}
         <p class="demo-label">DEMO · illustrative scenarios, not live signals</p>
-        <div class="picker"><Menu value={setup.id} options={SETUPS.map((s) => ({ value: s.id, label: s.name }))} onpick={(id) => loadDemo(id as SetupId)} testid="coach-setup" ariaLabel="Trading setup" align="left" dropdown /><span class="dim">{setup.style}</span></div>
-        <p class="dim">{setup.timeframe}</p>
         <div class="sides" aria-label="Example direction">
           <button class="ui-tab" class:on={demo?.side === 'buy'} aria-pressed={demo?.side === 'buy'} data-testid="coach-long" onclick={() => loadDemo(setup.id, 'buy')}>Long example</button>
           <button class="ui-tab" class:on={demo?.side === 'sell'} aria-pressed={demo?.side === 'sell'} data-testid="coach-short" disabled={!!meta.byName.get(market.coin)?.spot} onclick={() => loadDemo(setup.id, 'sell')}>Short example</button>
@@ -78,7 +74,7 @@
         <p class="dim" data-testid="coach-status">{agent.status === 'live' ? 'MCP workspace connected' : agent.address ? 'Reconnecting to MCP workspace' : 'Connect your local AI for live guidance'}</p>
         {#each advice as entry (entry.id)}<article data-testid="coach-advice"><strong>{entry.skill}</strong><p>{entry.advice}</p><p class="dim">Next: {entry.nextStep}</p><details><summary>Evidence</summary><p>{entry.evidence}</p></details></article>{/each}
         {#each suggestions as s (s.id)}<SuggestionCard {s} {now} />{/each}
-        {#if !count}<p class="dim">No guidance published for {market.coin} yet. Explore a setup demo while you wait.</p>{/if}
+        {#if !count}<p class="dim">No guidance published for {market.coin} yet. Open Example to see {setup.name} drawn on this chart.</p>{/if}
         {#if !agent.address}<button class="connect" data-testid="coach-connect" onclick={() => ui.overlay = 'aiConnect'}>Connect local AI</button>{/if}
       {/if}
     </div>
@@ -94,10 +90,10 @@
   nav { padding: 0 10px; border-bottom: 1px solid var(--line); }
   nav button { flex: 1; min-width: 0; padding: 5px 4px; }
   .body { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; overscroll-behavior: contain; }
-  .body[hidden], nav[hidden] { display: none; }
+  .body[hidden], nav[hidden], .picker[hidden] { display: none; }
   p { margin: 0; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
   .demo-label { color: var(--warn); font-size: max(8px, calc(var(--fs) * 0.85)); }
-  .picker { flex-wrap: wrap; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .picker { flex-wrap: wrap; display: flex; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 0 12px 8px; }
   .sides button, .phases button { flex: 1; min-width: 0; }
   .phases button { text-transform: capitalize; padding: 6px 2px; font-size: max(8px, calc(var(--fs) * 0.85)); }
   .levels { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 10px; background: var(--bg); border-radius: var(--radius); color: var(--dim); }

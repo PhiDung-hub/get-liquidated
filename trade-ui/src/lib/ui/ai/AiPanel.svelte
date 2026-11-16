@@ -5,15 +5,12 @@
   import { ui } from '$lib/ui/state.svelte';
   import SuggestionCard from './SuggestionCard.svelte';
   import AiTerminal from './AiTerminal.svelte';
-  import { loadDemo, showCoach } from './setups.svelte';
+  import { coach, showCoach } from './setups.svelte';
   import { CLIENTS, setupPrompt, type Client } from '$lib/agent/setupPrompt';
   import { load } from '$lib/util/storage';
 
   const openConnect = () => (ui.overlay = 'aiConnect');
-  function openCoach() {
-    showCoach(agent.address ? 'live' : 'demo');
-    if (!agent.address) loadDemo('vwap');
-  }
+  const openCoach = () => showCoach(coach.mode);
   let code = $state('');
   let copied = $state<'' | 'ok' | 'prompt' | 'failed'>('');
   async function copySetup(text = SETUP_COMMAND, done: 'ok' | 'prompt' = 'ok') {
@@ -142,7 +139,7 @@
       </button>
     </form>
   {/if}
-  <p class="coach-link dim"><button data-testid="ai-open-coach" title="Setup demos and live ideas beside price" onclick={tap(openCoach)}>Chart coach</button>{#if agent.address} · <button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={tap(openConnect)}>Connection</button>{/if}</p>
+  <p class="coach-link dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={tap(openCoach)}>Chart coach</button>{#if agent.address} · <button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={tap(openConnect)}>Connection</button>{/if}</p>
   {#if companion.waiting}<p class="dim" data-testid="ai-permission-hint">Allow access to apps on this device (Chrome/Edge) or local network access (Firefox).</p>{/if}
   {#if agent.error && !handheld.current}<p class="err" data-testid="ai-error">{agent.error}</p>{/if}
   {#if agent.error && (agent.status === 'offline' || companion.retryPair)}<button class="open" data-testid="ai-retry" onclick={tap(retryNow)}>Retry</button>{/if}

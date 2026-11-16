@@ -25,15 +25,24 @@ export const SETUPS = [
 
 export type SetupId = (typeof SETUPS)[number]['id'];
 type Demo = { coin: string; setup: SetupId; side: 'buy' | 'sell'; entry: number; stop: number; target: number; at: number };
-export const coach = $state({ open: false, collapsed: false, mode: 'live' as 'live' | 'demo' | 'metrics', demo: null as Demo | null, phase: 'watching' as 'watching' | 'triggered' | 'invalidated', lines: 0, error: '' });
+export const coach = $state({ open: false, collapsed: false, mode: 'live' as 'live' | 'demo' | 'metrics', setup: 'vwap' as SetupId, demo: null as Demo | null, phase: 'watching' as 'watching' | 'triggered' | 'invalidated', lines: 0, error: '' });
 
 export function showCoach(mode: 'live' | 'demo' | 'metrics' = 'live') {
   coach.open = true;
   coach.collapsed = false;
   coach.mode = mode;
+  if (mode === 'demo' && coach.demo?.coin !== market.coin) loadDemo();
 }
 
-export function loadDemo(id: SetupId, side: 'buy' | 'sell' = coach.demo?.side ?? 'buy') {
+/** The setup chosen at the top of the coach: every view follows it, and a drawn example is redrawn for it. */
+export function pickSetup(id: SetupId) {
+  coach.setup = id;
+  if (coach.mode === 'demo') loadDemo(id);
+  else coach.demo = null;
+}
+
+export function loadDemo(id: SetupId = coach.setup, side: 'buy' | 'sell' = coach.demo?.side ?? 'buy') {
+  coach.setup = id;
   const setup = SETUPS.find((s) => s.id === id);
   const asset = meta.byName.get(market.coin);
   const mark = market.ctx?.markPx;

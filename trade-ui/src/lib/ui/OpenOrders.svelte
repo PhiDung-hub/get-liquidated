@@ -109,7 +109,7 @@
   </table>
 {/if}
 
-{#snippet cancelAll()}<button class="sweep" data-testid="cancel-all-open" onclick={(e) => sweepOf(e, 'cancel')}>Cancel All</button>{/snippet}
+{#snippet cancelAll()}<button class="sweep" data-testid="cancel-all-open" onclick={(e) => sweepOf(e, 'cancel', true)}>Cancel All</button>{/snippet}
 {#snippet actions(o: OpenOrder)}{#if editable(o)}<button class="edit" data-testid="order-edit" onclick={(e) => (e.currentTarget.blur(), editOrder(o))}>Edit</button>{/if}<button class="cancel" disabled={cancelling.has(o.oid)} onclick={cancel(o)}>Cancel</button>{/snippet}
 
 {#if !list.length}

@@ -38,14 +38,27 @@ export async function stopThenCancel(inScope: (coin: string) => boolean, include
 
 export type SweepKind = 'flatten' | 'cancel';
 /** The flatten or cancel-all checklist: the coins it opened with, the ticked ones, and whether it is running. */
-export const sweep = $state({ kind: 'flatten' as SweepKind, coins: [] as string[], ticked: [] as string[], stopped: 0, busy: false });
+export const sweep = $state({ kind: 'flatten' as SweepKind, coins: [] as string[], ticked: [] as string[], scope: null as SweepScope | null, stopped: 0, busy: false });
 let stopping: Promise<void>[] = [];
 
+/** The Open orders filter a Cancel All was pressed under: one coin or '' for every coin, one side or both. */
+export type SweepScope = { coin: string; isBuy?: boolean };
+export const inSweepScope = (s: SweepScope, coin: string, isBuy?: boolean) => (!s.coin || coin === s.coin) && (!spotName(coin) || listed(coin)) && onSide(s.isBuy, isBuy ?? s.isBuy ?? true);
+
 /** Every coin with exposure on every dex, all ticked: positions (flatten only), resting orders and running chases. Spot orders and chases are in cancel-all only: flatten is perps-only. Opening stops every chase and clears the hotkeys still queued. */
-export function openSweep(kind: SweepKind) {
+export function openSweep(kind: SweepKind, scope: SweepScope | null = null) {
   clearQueued();
   if (kind === 'flatten' && !inventory.loaded) throw new Error('positions not loaded yet');
   assertOrdersLoaded();
+  // With a scope there is no checklist: exactly what the filter shows is cancelled, and only its chases stop.
+  if (scope) {
+    const any = openOrders.list.some((o) => inSweepScope(scope, o.coin, o.side === 'B')) || chases.list.some((c) => c.state !== 'stopped' && inSweepScope(scope, c.coin, c.isBuy));
+    if (!any) return void toast.error('nothing to cancel');
+    const stops = stopChases((c) => inSweepScope(scope, c), scope.isBuy);
+    stopping = [...stopping, ...stops];
+    Object.assign(sweep, { kind, coins: [], ticked: [], scope, stopped: stops.length, busy: false });
+    return void (ui.overlay = 'sweep');
+  }
   const held = kind === 'flatten' ? inventory.positions.filter((p) => p.szi !== 0).map((p) => p.coin) : [];
   const running = chases.list.filter((c) => c.state !== 'stopped' && (kind === 'cancel' || !spotName(c.coin))).map((c) => c.coin);
   const ordered = openOrders.list.map((o) => o.coin).filter((c) => !spotName(c) || (kind === 'cancel' && listed(c)));
@@ -53,7 +66,7 @@ export function openSweep(kind: SweepKind) {
   if (!coins.length) return void toast.error(`nothing to ${kind === 'flatten' ? 'flatten' : 'cancel'}`);
   const stops = stopChases(() => true);
   stopping = [...stopping, ...stops];
-  Object.assign(sweep, { kind, coins, ticked: coins, stopped: stops.length, busy: false });
+  Object.assign(sweep, { kind, coins, ticked: coins, scope: null, stopped: stops.length, busy: false });
   ui.overlay = 'sweep';
 }
 
@@ -64,13 +77,15 @@ export function closeSweep() {
 /** Flatten closes first and cancels only where flat; cancel-all cancels every order of the ticked coins, TP/SL included. */
 export async function runSweep() {
   const coins = sweep.coins.filter((c) => sweep.ticked.includes(c));
+  const scope = sweep.scope;
   if (sweep.busy) return;
-  if (!coins.length) return void toast.error('nothing ticked');
+  if (!scope && !coins.length) return void toast.error('nothing ticked');
   const waits = stopping;
   stopping = [];
   sweep.busy = true;
   try {
-    if (sweep.kind === 'cancel') await stopThenCancel((c) => coins.includes(c), true);
+    if (scope) await stopThenCancel((c) => inSweepScope(scope, c), true, scope.isBuy);
+    else if (sweep.kind === 'cancel') await stopThenCancel((c) => coins.includes(c), true);
     else await flattenCoins(coins);
     await Promise.all(waits);
     if (sweep.kind === 'flatten' && waits.length) await warnIfNotFlat(coins);

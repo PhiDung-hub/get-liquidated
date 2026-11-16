@@ -2,7 +2,8 @@
   import { inventory } from '$lib/account/inventory.svelte';
   import { openOrders } from '$lib/account/orders.svelte';
   import { meta } from '$lib/market/meta.svelte';
-  import { closeSweep, runSweep, sweep } from '$lib/orders/sweep.svelte';
+  import { chases } from '$lib/orders/chase.svelte';
+  import { closeSweep, inSweepScope, runSweep, sweep } from '$lib/orders/sweep.svelte';
   import { fmtSz, fmtUsdShort } from '$lib/util/format';
   import Coin from './Coin.svelte';
 
@@ -12,6 +13,8 @@
       coin, p: inventory.positions.find((x) => x.coin === coin && x.szi !== 0), n: openOrders.list.filter((o) => o.coin === coin).length
     }))
   );
+  const scope = $derived(sweep.scope);
+  const scoped = $derived(scope ? openOrders.list.filter((o) => inSweepScope(scope, o.coin, o.side === 'B')).length + chases.list.filter((c) => c.state === 'chasing' && inSweepScope(scope, c.coin, c.isBuy)).length : 0);
   const all = $derived(sweep.ticked.length === sweep.coins.length);
   const toggle = (coin: string) => (sweep.ticked = sweep.ticked.includes(coin) ? sweep.ticked.filter((c) => c !== coin) : [...sweep.ticked, coin]);
   const tap = (f: () => unknown) => (e: MouseEvent) => ((e.currentTarget as HTMLElement).blur(), f());
@@ -35,6 +38,9 @@
 
 <div class="scrim" role="presentation" onclick={closeSweep}></div>
 <div class="sheet" role="dialog" data-sheet aria-label={flatten ? 'Flatten' : 'Cancel all'} tabindex="-1" bind:this={dialog} data-testid="sweep" data-kind={sweep.kind}>
+  {#if scope}
+    <h3 data-testid="sweep-scope">Cancel {scoped} {scope.isBuy === undefined ? '' : scope.isBuy ? 'buy ' : 'sell '}order{scoped === 1 ? '' : 's'}{#if scope.coin}{' '}on <Coin coin={scope.coin} />{/if}, TP/SL included</h3>
+  {:else}
   <h3>{flatten ? 'Flatten: close, then cancel orders where flat' : 'Cancel all orders, TP/SL included'}</h3>
   <table>
     <thead>
@@ -55,11 +61,12 @@
       {/each}
     </tbody>
   </table>
-  <p class="dim">{#if sweep.stopped}<span class="stopped">Stopped {sweep.stopped} running chase(s). </span>{/if}<span class="hint">Enter confirms, Esc cancels, Space or a click ticks a row.</span></p>
+  {/if}
+  <p class="dim">{#if sweep.stopped}<span class="stopped">Stopped {sweep.stopped} running chase(s). </span>{/if}<span class="hint">Enter confirms, Esc cancels{scope ? '' : ', Space or a click ticks a row'}.</span></p>
   <div class="actions">
     <button data-testid="sweep-cancel" disabled={sweep.busy} onclick={tap(closeSweep)}>Cancel</button>
-    <button class="go" data-testid="sweep-confirm" aria-keyshortcuts="Enter" title="Enter to confirm" data-confirm-error={sweep.busy ? 'Submission in progress.' : 'Select at least one market to confirm.'} disabled={sweep.busy || !sweep.ticked.length} onclick={tap(runSweep)}>
-      {sweep.busy ? '…' : `${flatten ? 'Flatten' : 'Cancel orders on'} ${sweep.ticked.length} of ${sweep.coins.length}`}
+    <button class="go" data-testid="sweep-confirm" aria-keyshortcuts="Enter" title="Enter to confirm" data-confirm-error={sweep.busy ? 'Submission in progress.' : 'Select at least one market to confirm.'} disabled={sweep.busy || (!scope && !sweep.ticked.length)} onclick={tap(runSweep)}>
+      {sweep.busy ? '…' : scope ? `Cancel ${scoped} order${scoped === 1 ? '' : 's'}` : `${flatten ? 'Flatten' : 'Cancel orders on'} ${sweep.ticked.length} of ${sweep.coins.length}`}
     </button>
   </div>
 </div>

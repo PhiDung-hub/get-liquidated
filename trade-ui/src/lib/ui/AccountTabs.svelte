@@ -72,7 +72,7 @@
         <span class="acts">
           {#if cardFold.run}<button class="fold" data-testid="cards-toggle-all" aria-expanded={cardFold.open} onclick={(e) => (cardFold.run?.(), e.currentTarget.blur())}>{cardFold.open ? 'Collapse All' : 'Expand All'}</button>{/if}
           {#if closeAll}<button class="sweep" data-testid="flatten-open" onclick={(e) => sweepOf(e, 'flatten')}>Close All</button>{/if}
-          {#if cancelAll}<button class="sweep" data-testid="cancel-all-open" onclick={(e) => sweepOf(e, 'cancel')}>Cancel All</button>{/if}
+          {#if cancelAll}<button class="sweep" data-testid="cancel-all-open" onclick={(e) => sweepOf(e, 'cancel', true)}>Cancel All</button>{/if}
         </span>
       </div>
     {/if}

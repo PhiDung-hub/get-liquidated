@@ -138,8 +138,10 @@
   };
   // The box keeps its own text while it reads as the stored number, so "0." or "." is not rewritten mid-edit.
   let sizeText = $state<Partial<Record<HotkeyType, string>>>({});
-  const sizeShown = (t: HotkeyType) => ((s, v) => (s !== undefined && (Number(s) || 0) === v ? s : v))(sizeText[t], settings.hotkeySizes[t].value);
-  const typeSize = (t: HotkeyType, el: HTMLInputElement) => (settings.hotkeySizes[t].value = Number((el.value = sizeText[t] = typeHotkeySize(t, el.value))) || 0);
+  // A box with no digit yet holds NaN, which the change check refuses and replaces with the previous size.
+  const sizeOf = (s: string) => (/\d/.test(s) ? Number(s) : NaN);
+  const sizeShown = (t: HotkeyType) => ((s, v) => (s !== undefined && Object.is(sizeOf(s), v) ? s : v))(sizeText[t], settings.hotkeySizes[t].value);
+  const typeSize = (t: HotkeyType, el: HTMLInputElement) => (settings.hotkeySizes[t].value = sizeOf((el.value = sizeText[t] = typeHotkeySize(t, el.value))));
   const modeOf = (t: HotkeyType) => {
     const s = settings.hotkeySizes[t];
     return s.unit === 'pct' ? `pct-${s.basis}` : s.unit === 'coin' ? `coin:${s.coin}` : s.unit;

@@ -13,15 +13,17 @@ export const cardFold = $state({ open: false, run: null as (() => void) | null }
 /** The phone order cards' sort: value high to low, coin A–Z or newest first. */
 export const cardSort = $state({ orders: 'value' });
 export const accountView = $state({ coin: '', side: 'all' as AccountSide });
+// 'active' follows the chart's coin, as Hyperliquid's Active filter does.
+const filterCoin = () => (accountView.coin === 'active' ? market.coin : accountView.coin);
 export const inFilter = (coin: string, long?: boolean) => {
-  // 'active' follows the chart's coin, as Hyperliquid's Active filter does.
-  const selected = accountView.coin === 'active' ? market.coin : accountView.coin;
+  const selected = filterCoin();
   return (!selected || coin === selected) && (accountView.side === 'all' || long === undefined || long === (accountView.side === 'long'));
 };
-export function sweepOf(e: MouseEvent, kind: SweepKind) {
+/** `filtered`: Cancel All takes the tab's coin and side filter as it stands, with no checklist. */
+export function sweepOf(e: MouseEvent, kind: SweepKind, filtered = false) {
   (e.currentTarget as HTMLElement).blur();
   try {
-    openSweep(kind);
+    openSweep(kind, filtered ? { coin: filterCoin(), isBuy: accountView.side === 'all' ? undefined : accountView.side === 'long' } : null);
   } catch (err) {
     toast.error((err as Error).message);
   }

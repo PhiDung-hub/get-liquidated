@@ -144,7 +144,7 @@
   </div>
   <div class="rows">
     <p data-testid="close-summary">Close · <span class:buy={!long} class:sell={long}>{long ? 'Sell' : 'Buy'}</span> {sz} {symOf(coin)}{limit ? (px > 0 ? ` at ${px}` : '') : ' at market'}</p>
-    <span class="est"><abbr class="dim" data-testid="close-help" title={help}>Est. PnL</abbr> <span data-testid="close-pnl" class:buy={pnl > 0} class:sell={pnl < 0}>{fmtUsd(pnl)}</span></span>
+    <span class="est"><abbr class="dim" data-testid="close-help" title={help}>PnL</abbr> <span data-testid="close-pnl" class:buy={pnl > 0} class:sell={pnl < 0}>{fmtUsd(pnl)}</span></span>
   </div>
   {#if error}<p class="err" data-testid="close-error">{error}</p>{/if}
   <div class="actions">

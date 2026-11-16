@@ -10,7 +10,7 @@ export type ActionId =
   | 'placeTicket'
   | 'cancelMarket' | 'cancelBuys' | 'cancelSells' | 'cancelLast' | 'cancelAll' | 'positionTp' | 'positionSl' | 'close' | 'closeAll' | 'flatten'
   | 'buyMkt' | 'sellMkt' | 'bidAlo' | 'askAlo' | 'chaseBuy' | 'chaseSell' | 'scaleBuy' | 'scaleSell' | 'closeLimit' | 'closeAllAlo'
-  | 'chartUp' | 'chartDown' | 'chartReset' | 'chartBack' | 'chartForward' | 'chartZoomIn' | 'chartZoomOut' | 'chartZoomInBoth' | 'chartZoomOutBoth' | 'indicators' | 'chartLog' | 'chartPercent' | 'chartInvert' | 'zen' | 'toggleOrder' | 'togglePositions' | 'toggleBook' | 'cycleAccount'
+  | 'chartUp' | 'chartDown' | 'chartReset' | 'chartBack' | 'chartForward' | 'chartZoomIn' | 'chartZoomOut' | 'chartZoomInBoth' | 'chartZoomOutBoth' | 'indicators' | 'chartLog' | 'chartPercent' | 'chartInvert' | 'zen' | 'chartFull' | 'toggleOrder' | 'togglePositions' | 'toggleBook' | 'cycleAccount'
   | 'drawH' | 'drawV' | 'drawTrend' | 'drawFib' | 'askAi' | 'toggleFills'
   | 'interval1' | 'interval2' | 'interval3' | 'interval4' | 'interval5' | 'interval6' | 'interval7' | 'interval8';
 export interface ActionDef { id: ActionId; label: string; group: Group; gate: Gate; double?: boolean; fixed?: boolean; keys: Binding[] }
@@ -91,7 +91,8 @@ export const ACTIONS: ActionDef[] = [
   { id: 'positionSl', label: 'SL for this position (full size, price you type)', group: 'Risk-reducing', gate: 'A', keys: [k('KeyT', true)] },
   chart('toggleFills', 'Show / hide buy/sell markers', [alt('KeyM')]),
   chart('chartZoomInBoth', 'Zoom time and price in', [{ code: 'Equal', shift: true, alt: true }]),
-  chart('chartZoomOutBoth', 'Zoom time and price out', [{ code: 'Minus', shift: true, alt: true }])
+  chart('chartZoomOutBoth', 'Zoom time and price out', [{ code: 'Minus', shift: true, alt: true }]),
+  chart('chartFull', 'Fullscreen chart (Esc exits)', [k('F9')])
 ];
 
 const byId = new Map(ACTIONS.map((a) => [a.id, a]));

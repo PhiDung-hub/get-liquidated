@@ -11,6 +11,7 @@
   import { meta } from '$lib/market/meta.svelte';
   import { isTouch } from '$lib/ui/touch';
   import { fmtPx } from '$lib/util/format';
+  import AiMessage from './AiMessage.svelte';
   import SuggestionCard from './SuggestionCard.svelte';
 
   type Message = (typeof agent.chats)[number]['messages'][number];
@@ -21,26 +22,11 @@
     | { kind: 'advice'; key: string; at: number; entry: Advice }
     | { kind: 'ticket'; key: string; at: number; s: Suggestion }
     | { kind: 'mark'; key: string; at: number; mark: Mark };
-  type Segment = { kind: 'text' | 'pre' | 'code' | 'strong'; text: string };
 
   const OPEN = ['sending', 'sent', 'received'];
   const statuses = { sending: 'Sending to terminal', sent: 'Sent to terminal · awaiting AI', received: 'Read by AI · awaiting reply', replied: 'Replied', failed: 'Delivery unconfirmed' };
   const finite = (t: unknown) => (Number.isFinite(t) ? (t as number) : 0);
-  const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const price = (mark: Mark, px: number) => fmtPx(px, meta.byName.get(mark.coin)?.szDecimals);
-
-  /** AI text as plain nodes: fenced blocks, backtick spans and **bold** only, so nothing it writes becomes a link, an image or markup. */
-  function segments(text: string): Segment[] {
-    const out: Segment[] = [];
-    let from = 0;
-    for (const m of text.matchAll(/```(?:[^\n`]*\n)?([\s\S]*?)```|`([^`\n]+)`|\*\*([^*\n]+)\*\*/g)) {
-      if (m.index > from) out.push({ kind: 'text', text: text.slice(from, m.index) });
-      out.push(m[1] !== undefined ? { kind: 'pre', text: m[1] } : m[2] !== undefined ? { kind: 'code', text: m[2] } : { kind: 'strong', text: m[3] });
-      from = m.index + m[0].length;
-    }
-    if (from < text.length) out.push({ kind: 'text', text: text.slice(from) });
-    return out;
-  }
 
   const rows = $derived<Row[]>([
     ...agent.chats.filter((c) => c.mark.coin === market.coin).flatMap((c) => c.messages.map((message): Row => ({ kind: 'chat', key: `c:${c.mark.id}:${message.id}`, at: message.created, mark: c.mark, message }))),
@@ -222,8 +208,6 @@
   });
 </script>
 
-{#snippet rich(text: string)}{#each segments(text) as part}{#if part.kind === 'pre'}<pre><code>{part.text}</code></pre>{:else if part.kind === 'code'}<code>{part.text}</code>{:else if part.kind === 'strong'}<strong>{part.text}</strong>{:else}{part.text}{/if}{/each}{/snippet}
-
 {#snippet files(list: Attachment[] | undefined)}{#if list?.length}<small data-testid="ai-sent-attachments">{sentTags(list)}</small>{/if}{/snippet}
 
 <svelte:document ondrop={dropped} />
@@ -231,22 +215,18 @@
 {#snippet chatRow(row: ChatRow)}
   <li>
     {#if anchors.has(row.key)}<button class="link" data-testid="ai-thread-anchor" title="Open this thread on the chart" onclick={() => (annotationChat.markId = row.mark.id)}>{anchor(row.mark)}</button>{/if}
-    {#if row.message.role === 'user'}
-      <small class="you">❯ you · {clock(row.at)}</small><p>{row.message.text}</p>{@render files(row.message.attachments)}
-    {:else}
-      <small>◆ mentor · {clock(row.at)}</small><p class="reply">{@render rich(row.message.text)}</p>
-    {/if}
+    <AiMessage at={row.at} ai={row.message.role !== 'user'} text={row.message.text}>{@render files(row.message.attachments)}</AiMessage>
   </li>
 {/snippet}
 
 {#snippet commandRow(command: Command)}
   <li data-testid="ai-terminal-command">
-    <small class="you">❯ you → {command.client} · {command.sessionId} · <time datetime={new Date(command.created).toISOString()}>{clock(command.created)}</time></small>
-    <p>{command.message}</p>
-    {@render files(command.attachments)}
-    <small role="status">{statuses[command.status]}</small>
-    {#if command.error}<p class="err">{command.error}</p>{/if}
-    {#if command.reply}<p class="reply" data-testid="ai-terminal-reply">{@render rich(command.reply)}</p>{/if}
+    <AiMessage at={command.created} text={command.message}>
+      {@render files(command.attachments)}
+      <small role="status" title={`${command.client} · ${command.sessionId}`}>{statuses[command.status]}</small>
+      {#if command.error}<p class="err">{command.error}</p>{/if}
+    </AiMessage>
+    {#if command.reply}<AiMessage at={command.updated} ai text={command.reply} testid="ai-terminal-reply" />{/if}
   </li>
 {/snippet}
 
@@ -315,11 +295,8 @@
   li > :global(*) { max-width: 100%; }
   p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   small { color: var(--dim); font-family: var(--mono); font-size: max(8px, calc(var(--fs) * 0.917)); overflow-wrap: anywhere; }
-  .you, .link { color: var(--accent); }
+  .link { color: var(--accent); }
   .link { padding: 0; background: none; text-align: left; }
-  .reply { color: var(--bright); }
-  code, pre { font-family: var(--mono); }
-  pre { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   article { align-self: stretch; border: 1px solid var(--surface); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
   summary { cursor: pointer; color: var(--dim); margin-bottom: 8px; }
   form { position: sticky; bottom: -10px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-bottom: 10px; margin-bottom: -10px; background: var(--panel); }

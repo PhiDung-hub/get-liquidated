@@ -6,6 +6,7 @@
   import { fmtPx } from '$lib/util/format';
   import { isTouch } from '$lib/ui/touch';
   import { drawings } from '$lib/ui/chart/drawings.svelte';
+  import AiMessage from './AiMessage.svelte';
   import { included, type SelectionContext } from '$lib/ui/chart/selection';
 
   let { time = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' '), dock = (): 'top' | 'bottom' => 'bottom', collect }: { time?: (t: number) => string; dock?: (price: number) => 'top' | 'bottom'; collect?: (sel: Selection) => SelectionContext } = $props();
@@ -191,7 +192,7 @@
     {#if includes}<small class="dim" data-testid="annotation-included">Included: {includes}</small>{/if}
     <div class="messages" aria-live="polite" role="log" aria-label="Annotation conversation">
       {#each thread?.messages ?? [] as message (message.id)}
-        <article class:mentor={message.role === 'assistant'}><small>{message.role === 'user' ? '❯ you' : '◆ mentor'}</small><p>{message.text}</p></article>
+        <AiMessage at={message.created} ai={message.role === 'assistant'} text={message.text} />
       {:else}<p class="dim">{sel ? 'Ask your local AI about this selection. Nothing is saved until you send.' : 'Ask about the reasoning, confirmation, or invalidation for this annotation.'}</p>{/each}
     </div>
     {#if pending.length}
@@ -232,10 +233,7 @@
   p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
   .prices { color: var(--accent); font-family: var(--mono); font-weight: 600; }
   .messages { display: grid; gap: 8px; max-height: 220px; overflow-y: auto; flex-shrink: 0; }
-  article { display: grid; gap: 2px; }
-  article small { font-family: var(--mono); }
-  article:not(.mentor) small, .quick button { color: var(--accent); }
-  article.mentor p { color: var(--bright); }
+  .quick button { color: var(--accent); }
   .waiting { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
   .waiting small { font-family: var(--mono); }
   .quick { display: flex; flex-wrap: wrap; gap: 2px 12px; }

@@ -75,25 +75,20 @@
 <div class="scrim" role="presentation" onclick={close}></div>
 <div class="modal" role="dialog" data-sheet aria-label="Adjust Margin" data-testid="margin-adjust-modal">
   <button class="x" aria-label="Close" onclick={close}>✕</button>
-  <h3>Adjust Margin</h3>
-  <p class="dim">Decrease the chance of liquidation by adding margin, or remove excess margin to use elsewhere.</p>
+  <h3 title="Decrease the chance of liquidation by adding margin, or remove excess margin to use elsewhere.">Adjust Margin <span class="dim"><Coin {coin} quote={dexOf(coin) ? quoteOf(coin) : 'USD'} /></span></h3>
   <div class="tabs">
     <button aria-pressed={tab === 'add'} data-testid="margin-tab-add" onclick={(e) => pick(e, 'add')}>Add</button>
     <button aria-pressed={tab === 'remove'} data-testid="margin-tab-remove" disabled={strict} title={strict ? STRICT : undefined} onclick={(e) => pick(e, 'remove')}>Remove</button>
   </div>
   {#if strict}<p class="dim" data-testid="margin-strict-note">{STRICT}</p>{/if}
-  <div class="hero">
-    <span class="dim">Margin</span>
-    <div class="big"><span data-testid="margin-current">{fmtUsd(p?.marginUsed ?? NaN)}</span>{#if next !== null}<span class="arrow">→</span><span class:up={tab === 'add'} class:down={tab === 'remove'} data-testid="margin-next">{fmtUsd(next)}</span>{/if}</div>
-    <div class="liq"><span class="dim">Est. liq. price</span> <span data-testid="margin-liq">{px(p?.liqPx ?? null)} → {px(liq)}</span></div>
-  </div>
   <label class="ui-field box">
     <input inputmode="decimal" autocomplete="off" placeholder="Amount" aria-label="amount" data-testid="margin-amount" value={amount} oninput={(e) => (e.currentTarget.value = amount = cutDecimals(e.currentTarget.value, 6))} />
     <span class="dim">USDC</span>
     <button class="max" data-testid="margin-max" disabled={max === null} onclick={() => (amount = max!.toFixed(2))}>Max</button>
   </label>
   <div class="rows">
-    <div><span>Position</span><span><Coin {coin} quote={dexOf(coin) ? quoteOf(coin) : 'USD'} /></span></div>
+    <div><span>Margin</span><span><span data-testid="margin-current">{fmtUsd(p?.marginUsed ?? NaN)}</span>{#if next !== null} → <span class:up={tab === 'add'} class:down={tab === 'remove'} data-testid="margin-next">{fmtUsd(next)}</span>{/if}</span></div>
+    <div><span>Liq. price</span><span data-testid="margin-liq">{px(p?.liqPx ?? null)} → {px(liq)}</span></div>
     <div>
       <span title={tab === 'add' ? 'Available to trade on this side' : 'Margin less max(value ÷ leverage, 10% of value), which HL keeps in the position'}>
         Max {tab === 'add' ? 'to add' : 'to remove'}
@@ -109,12 +104,13 @@
   .scrim { position: fixed; inset: 0; background: #000b; z-index: 20; }
   .modal {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 21;
-    width: min(440px, calc(100vw - 32px)); padding: 24px; display: flex; flex-direction: column; gap: 12px;
+    width: min(440px, calc(100vw - 32px)); padding: 16px; display: flex; flex-direction: column; gap: 10px;
     background: var(--panel); border: 1px solid var(--surface); border-radius: var(--radius);
   }
   .x { position: absolute; top: 14px; right: 14px; padding: 4px; background: none; color: var(--dim); font-size: var(--fs); line-height: 1; }
   .x:hover { color: var(--bright); }
-  h3 { margin: 0 0 4px; font-size: calc(var(--fs) * 1.667); font-weight: 400; color: var(--bright); text-align: center; }
+  h3 { margin: 0; font-size: calc(var(--fs) * 1.167); font-weight: 400; color: var(--bright); }
+  h3 .dim { font-size: var(--fs); }
   p { margin: 0; text-align: center; }
   .err { color: var(--sell); }
   .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: var(--radius); background: var(--surface); }
@@ -124,14 +120,10 @@
   .box { display: flex; align-items: center; gap: 8px; height: var(--ctl); padding: 0 10px; }
   .box input { flex: 1; min-width: 0; padding: 0; border: 0; outline: none; background: none; color: var(--bright); font-variant-numeric: tabular-nums; }
   .max { background: none; color: var(--accent); padding: 0 2px; }
-  .hero { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 12px; border-radius: var(--radius); background: var(--surface); font-variant-numeric: tabular-nums; }
-  .hero > .dim { font-size: max(8px, calc(var(--fs) * 0.917)); }
-  .big { display: flex; align-items: baseline; gap: 10px; font-size: calc(var(--fs) * 1.833); color: var(--bright); }
-  .arrow { color: var(--dim); font-size: calc(var(--fs) * 1.25); }
   .up { color: var(--buy); }
   .down { color: var(--sell); }
-  .liq { color: var(--text); }
-  .rows { display: flex; flex-direction: column; gap: 4px; font-size: max(8px, calc(var(--fs) * 0.917)); color: var(--dim); }
+  .rows { display: flex; flex-direction: column; gap: 4px; color: var(--dim); }
+  .rows div > :last-child { color: var(--text); }
   .rows div { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
-  .confirm { height: calc(var(--fs) * 3.333); border-radius: var(--radius); background: var(--accent); color: var(--bg); }
+  .confirm { height: var(--ctl); border-radius: var(--radius); background: var(--accent); color: var(--bg); }
 </style>

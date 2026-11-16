@@ -206,8 +206,8 @@
       </Field>
       {#if est}<div class="estimate" data-testid={`position-${kind.toLowerCase()}-estimate`}>
         {#if units[kind] !== 'price'}<span>Trigger price</span><span>{fmtPx(est.price, d)}</span>{/if}
-        <span>Est. net PnL</span><span class:buy={est.net >= 0} class:sell={est.net < 0}>{fmtNum(est.net, 2)} {quote}</span>
-        <span>Est. close fee</span><span>{fmtNum(est.fee, 4)} {quote}</span>
+        <span>Net PnL</span><span class:buy={est.net >= 0} class:sell={est.net < 0}>{fmtNum(est.net, 2)} {quote}</span>
+        <span>Close fee</span><span>{fmtNum(est.fee, 4)} {quote}</span>
       </div>{/if}
     </section>
   {/each}

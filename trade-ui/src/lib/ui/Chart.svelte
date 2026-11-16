@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type ChartCmd = 'reset' | 'back' | 'forward' | 'zoomIn' | 'zoomOut' | 'zoomInBoth' | 'zoomOutBoth' | 'log' | 'percent' | 'invert' | 'up' | 'down' | 'indicators';
+  export type ChartCmd = 'reset' | 'back' | 'forward' | 'zoomIn' | 'zoomOut' | 'zoomInBoth' | 'zoomOutBoth' | 'log' | 'percent' | 'invert' | 'up' | 'down' | 'indicators' | 'fullscreen';
   let active: ((cmd: ChartCmd) => void) | undefined;
   export const chartCmd = (cmd: ChartCmd) => active?.(cmd);
 </script>
@@ -21,7 +21,7 @@
   import { fmtCompact, fmtNum, fmtPct, fmtPx, fmtSz, pxDecimals } from '$lib/util/format';
   import { toast } from './toast.svelte';
   import { rateLimited, socket } from '$lib/transport/ws.svelte';
-  import { modal, ui } from './state.svelte';
+  import { modal, openSettings, ui } from './state.svelte';
   import { chartFont } from './display.svelte';
   import Menu from './order/Menu.svelte';
   import { cancelLine, lineLabels, positionLines, signed, toggleGroup } from './chart/positionLines.svelte';
@@ -40,7 +40,7 @@
   import { agent, annotationChat, askBlocked, noAi, type Selection } from '$lib/agent/agent.svelte';
   import AiPanel from '$lib/ui/ai/AiPanel.svelte';
   import AnnotationChat from './ai/AnnotationChat.svelte';
-  import { coach, demoLevels, showCoach } from './ai/setups.svelte';
+  import { coach, demoLevels } from './ai/setups.svelte';
   import { collectSelection } from './chart/selection';
   import { fillHover, fillMarkers } from './chart/fillMarkers.svelte';
   import { DEFS, inputsText, plotName, plotStyle, type Study } from '$lib/market/studies';
@@ -49,6 +49,8 @@
   import StudySettings from './chart/StudySettings.svelte';
   const SCALES = [['log', 'log', 'Log scale', 'chartLog'], ['percent', 'pct', 'Percent scale', 'chartPercent'], ['invert', 'inv', 'Invert scale', 'chartInvert']] as const;
   const MODES = { log: PriceScaleMode.Logarithmic, percent: PriceScaleMode.Percentage };
+  let scaleMenu = $state(false);
+  const regularOr = (m: keyof typeof MODES) => { if (scale.mode !== MODES[m]) command(m); };
   const RETRY_MS = [2000, 5000, 15000, 30000];
   const keys = (id: ActionId) => bindingsFor(id).map(keyLabel).join(' / ') || 'no key';
   const keyed = (id: ActionId, rest: string) => (bindingsFor(id).length ? `${keys(id)}; ${rest}` : rest);
@@ -156,7 +158,7 @@
       for (const child of fixed) {
         const css = getComputedStyle(child);
         available -= child.getBoundingClientRect().width;
-        if (!child.classList.contains('chart-actions')) available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
+        available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
       }
       let count = 0;
       for (const button of children.filter((child) => child.classList.contains('iv'))) {
@@ -238,7 +240,6 @@
   }
   let applied = $state({ mode: '', invert: false });
   let legend = $state<{ bar: Bar; vals: Record<string, string>; cols: Record<string, string>; focused: boolean }>();
-  const coachCount = $derived(agent.advice.filter((entry) => !entry.coin || entry.coin === market.coin).length + agent.suggestions.filter((s) => s.coin === market.coin).length);
   const loadCoach = () => import('./ai/ChartCoach.svelte').then((m) => m.default).catch(() => { coach.open = false; toast.error('Chart coach could not load. Reload the page and try again.'); return null; });
   const narrow = new MediaQuery('max-width: 900px');
   // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the zen toggle's room.
@@ -273,6 +274,7 @@
   /** A view order only: # keeps each order's place in fill order, which the effects and totals are computed in. */
   let groupSort = $state<{ key: keyof typeof SORTS; dir: 1 | -1 } | null>(null);
   const cycleSort = (key: keyof typeof SORTS) => (groupSort = groupSort?.key !== key ? { key, dir: -1 } : groupSort.dir === -1 ? { key, dir: 1 } : null);
+  let groupThrough = $state<number | null>(null);
   const sortRows = (rows: GroupRow[]) => {
     const numbered = rows.map((r, n) => ({ r, n }));
     const by = groupSort;
@@ -522,6 +524,7 @@
 
   function command(cmd: ChartCmd) {
     if (cmd === 'indicators') return void toggleIndicators();
+    if (cmd === 'fullscreen') return void toggleFullscreen();
     const ts = chart!.timeScale();
     if (cmd === 'reset') {
       resetShown = false;
@@ -1096,7 +1099,7 @@
 {#snippet groupRows(g: (typeof lineLabels.groups)[number])}
   <div class="group-heading"><span>#</span>{@render sortHead('px', 'Price')}{@render sortHead('sz', 'Size')}{@render sortHead('pnl', 'Fill effect', 'PnL is what the fill closes, in price order, against the current entry, before fees.')}{@render sortHead('pos', 'Σ position')}<span></span></div>
   {#each sortRows(g.rows) as { r, n } (r.key)}
-    <div class="row" class:under={r.under} class:opening={r.phase !== 'close'} data-phase={r.phase} data-position={r.projected} data-testid="group-row" data-oid={r.o.oid}>
+    <div class="row" class:through={groupThrough !== null && n <= groupThrough} class:under={r.under} class:opening={r.phase !== 'close'} role="row" tabindex="0" onpointerenter={() => (groupThrough = n)} onpointerleave={() => (groupThrough = null)} onfocus={() => (groupThrough = n)} onblur={() => (groupThrough = null)} data-phase={r.phase} data-position={r.projected} data-testid="group-row" data-oid={r.o.oid}>
       <span class="n">{n + 1}</span>{' '}{#each r.cells as c, i}<span class:price={i === 0} class:detail={i === 2} data-testid={i === 2 ? 'group-effect' : undefined}>{#if i === 2}{#if c}<span class="transition">{c}</span>{/if}{#if r.pnl !== undefined}{#if c}<span class="effect-separator">{' · '}</span>{/if}<b class="pnl" class:buy={r.pnl > 0} class:sell={r.pnl < 0}>{signed(r.pnl)}</b>{/if}{:else}{c}{/if}</span>{' '}{/each}
       <span class="cumulative" data-testid="group-cumulative" title="Your position if every order on this side fills, in price order, through this row."><b class:buy={r.projected > 0} class:sell={r.projected < 0}>{#if r.projected === 0}Flat{:else}<span>{r.projected > 0 ? 'Long' : 'Short'}</span>{' '}<span>{fmtSz(Math.abs(r.projected), meta.byName.get(market.coin)?.szDecimals)}</span>{/if}</b></span>
       {#if r.x}
@@ -1105,11 +1108,14 @@
       {:else}<span></span>{/if}
     </div>
   {/each}
-  {@const gain = g.rows.reduce((sum, r) => sum + (r.pnl ?? 0), 0)}
-  {@const filled = g.rows.reduce((sum, r) => sum + r.filled, 0)}
-  <div class="group-totals" data-testid="group-totals" title="Estimated totals for this group in price order, after earlier orders on the same side. Filled size respects reduce-only limits. Gain is realized PnL before fees; fills are not guaranteed.">
-    <span>Total est. gain <b class="pnl" class:buy={gain > 0} class:sell={gain < 0} data-testid="group-total-gain" title={`${fmtNum(gain, 2)} USD before fees`}>{signed(gain)}</b></span>
-    <span>Total est. filled <b data-testid="group-total-filled">{fmtSz(filled, meta.byName.get(market.coin)?.szDecimals)} {nameOf(market.coin)}</b></span>
+  {@const through = groupThrough !== null && groupThrough < g.rows.length - 1 ? groupThrough : null}
+  {@const part = through === null ? g.rows : g.rows.slice(0, through + 1)}
+  {@const scope = through === null ? 'Total' : `Through #${through + 1}`}
+  {@const gain = part.reduce((sum, r) => sum + (r.pnl ?? 0), 0)}
+  {@const filled = part.reduce((sum, r) => sum + r.filled, 0)}
+  <div class="group-totals" data-testid="group-totals" data-through={through === null ? undefined : through + 1} title="Totals for this group in price order, after earlier orders on the same side. Point at or focus a row to total through that row. Filled size respects reduce-only limits. Gain is realized PnL before fees; fills are not guaranteed.">
+    <span>{scope} gain <b class="pnl" class:buy={gain > 0} class:sell={gain < 0} data-testid="group-total-gain" title={`${fmtNum(gain, 2)} USD before fees`}>{signed(gain)}</b></span>
+    <span>{scope} filled <b data-testid="group-total-filled">{fmtSz(filled, meta.byName.get(market.coin)?.szDecimals)} {nameOf(market.coin)}</b></span>
   </div>
 {/snippet}
 {#snippet icon(d: string)}<svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true"><path {d} fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>{/snippet}
@@ -1172,8 +1178,6 @@
         <button class:on={inZen()} data-testid="zen-toggle" title="Zen mode: chart only ({keys('zen')}, Esc exits)" aria-label="Zen mode" onclick={(e) => (e.currentTarget.blur(), setZen(!inZen()))}><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 4h16v16H4zM4 13h7v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       {/if}
     </span>
-    {#if !noAi()}<button class="coach-launch" class:on={coach.open} data-testid="chart-ai" data-status={agent.status} aria-label="AI setups and guidance" aria-expanded={coach.open} onclick={(e) => { e.currentTarget.blur(); if (coach.open) coach.open = false; else showCoach(coach.mode); }}>AI{#if coachCount}<span>{coachCount}</span>{/if}</button>{/if}
-    <span class="chart-actions"><button data-testid="chart-fullscreen" aria-label={fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart'} aria-pressed={fullscreen} title="Fullscreen chart (Esc exits)" onclick={(e) => { e.currentTarget.blur(); void toggleFullscreen(); }}><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d={fullscreen ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button></span>
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
   <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
@@ -1291,38 +1295,64 @@
       <button data-testid="chart-goto" aria-label="Go to date" title="Go to a date or range" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'goto'))}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1" /><path d="M2 6.5h12M5 1.5v3M11 1.5v3" /></svg></button>
     </div>
     <span class="funding" data-testid="chart-funding" aria-hidden="true"></span>
-      <button class="mode" class:on={autoOn} aria-pressed={autoOn} data-testid="scale-auto" title="Auto-scale ({keys('chartReset')})" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>auto</button>
-      {#each SCALES as [cmd, id, text, action]}
-        {@const on = cmd === 'invert' ? scale.invert : scale.mode === MODES[cmd]}
-        <button class="mode" class:on aria-pressed={on} data-testid="scale-{id}" title="{text} ({keys(action)})" onclick={(e) => (e.currentTarget.blur(), command(cmd))}>{id === 'pct' ? '%' : id}</button>
-      {/each}
-
     <label class="timezone"><time data-testid="chart-clock" datetime={new Date(now).toISOString()}>{zoneFormats.clock.format(now)} ({clockOffset})</time><span aria-hidden="true">⌄</span><select aria-label="Chart timezone" data-testid="chart-timezone" value={settings.chart.timezone} onchange={(e) => { settings.chart.timezone = e.currentTarget.value; persist(); e.currentTarget.blur(); }}>
       <option value="local">Local ({localZone.replaceAll('_', ' ')})</option>
       <optgroup label="Common regions">{#each commonZones as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>
       <optgroup label="All regions">{#each [...new Set([...allZones, settings.chart.timezone])].filter((zone) => zone !== 'local' && !commonZones.includes(zone)).sort() as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>
     </select></label>
+    <span class="scales" onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) scaleMenu = false; }}>
+      {#each [SCALES[2], SCALES[1], SCALES[0]] as [cmd, id, text, action]}
+        {@const on = cmd === 'invert' ? scale.invert : scale.mode === MODES[cmd]}
+        <button class="mode" class:on aria-pressed={on} data-testid="scale-{id}" title="{text} ({keys(action)})" onclick={(e) => (e.currentTarget.blur(), command(cmd))}>{id === 'pct' ? '%' : id}</button>
+      {/each}
+      <button class="mode" class:on={autoOn} aria-pressed={autoOn} data-testid="scale-auto" title="Auto-scale ({keys('chartReset')})" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>auto</button>
+      <button class="mode" class:on={scaleMenu} aria-expanded={scaleMenu} aria-label="Chart scale settings" title="Chart scale settings" data-testid="scale-menu" onclick={() => (scaleMenu = !scaleMenu)}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.5 13.6 4.75v6.5L8 14.5l-5.6-3.25v-6.5z" /><circle cx="8" cy="8" r="2.1" /></svg></button>
+      {#if scaleMenu}
+        {@const regular = scale.mode === PriceScaleMode.Normal}
+        <div class="ui-menu scale-menu" role="menu" tabindex="-1" aria-label="Chart scale settings" data-testid="scale-settings" onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); scaleMenu = false; } }}>
+          {#snippet item(id: string, label: string, on: boolean, run: () => void, key = '')}
+            <button role="menuitemcheckbox" aria-checked={on} data-testid="scale-item-{id}" onclick={() => { run(); scaleMenu = false; }}><span class="tick" aria-hidden="true">{on ? '✓' : ''}</span><span>{label}</span><span class="key">{key}</span></button>
+          {/snippet}
+          {@render item('auto', 'Auto (fits data to screen)', autoOn, () => command('reset'), keys('chartReset'))}
+          {@render item('invert', 'Invert scale', scale.invert, () => command('invert'), keys('chartInvert'))}
+          <hr />
+          {@render item('regular', 'Regular', regular, () => (scale.mode = PriceScaleMode.Normal))}
+          {@render item('percent', 'Percent', scale.mode === MODES.percent, () => regularOr('percent'), keys('chartPercent'))}
+          {@render item('log', 'Logarithmic', scale.mode === MODES.log, () => regularOr('log'), keys('chartLog'))}
+          <hr />
+          {@render item('fills', 'Buy/sell markers', settings.chart.indicators.fills.on, () => { settings.chart.indicators.fills.on = !settings.chart.indicators.fills.on; persist(); })}
+          <hr />
+          {@render item('more', 'More settings…', false, () => openSettings('display'))}
+        </div>
+      {/if}
+    </span>
+
   </div>
 </div>
 
 <style>
-  .coach-launch { display: inline-flex; align-items: center; gap: 4px; background: none; color: var(--dim); }
-  .coach-launch.on, .coach-launch span { color: var(--accent); }
   .copilot-launch { position: absolute; z-index: 8; top: 8px; right: calc(var(--axis-w, 0px) + 8px); display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--dim); }
   .copilot-launch:hover { color: var(--bright); }
   .copilot-launch[aria-expanded='true'], .copilot-launch span { color: var(--accent); }
   .chart :global(.annotation-chat.top) { top: 40px; }
   .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 48px); width: min(340px, calc(100% - var(--axis-w, 0px) - 16px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
   .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + 356px), 12px + 50%); }
-  .chart-actions { margin-left: auto; }
   .chart-refresh { position: absolute; z-index: 2; transform: translateX(-50%); opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; }
   .chart-refresh.shown, .chart-refresh:focus-within { opacity: 1; visibility: visible; }
   .chart-refresh button { width: 20px; height: 20px; min-width: 0; min-height: 0; padding: 0; border-radius: 0; border: 0; background: none; color: var(--dim); font-size: 16px; line-height: 1; }
   .chart-refresh button:hover { color: var(--bright); }
   .chart-footer button { background: var(--panel); color: var(--dim); }
   .chart-coin { flex: none; padding: 4px 6px; color: var(--bright); font-weight: 600; white-space: nowrap; }
-  [data-testid='chart-fullscreen'], [data-testid='zen-toggle'] { display: inline-flex; align-items: center; padding: 4px 6px; }
+  [data-testid='zen-toggle'] { display: inline-flex; align-items: center; padding: 4px 6px; }
   .chart-footer button.on { color: var(--accent); }
+  .scales { position: relative; display: inline-flex; align-items: center; gap: inherit; }
+  .scales > button { display: inline-flex; align-items: center; }
+  .scale-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 6; display: grid; min-width: 250px; padding: 4px 0; white-space: nowrap; }
+  .chart-footer .scale-menu button { display: grid; grid-template-columns: 2ch 1fr auto; gap: 8px; align-items: center; padding: 5px 12px; background: none; color: var(--text); text-align: left; border-radius: 0; }
+  .chart-footer .scale-menu button:hover { background: var(--surface); color: var(--bright); }
+  .scale-menu .tick { color: var(--accent); }
+  .scale-menu .key { color: var(--dim); }
+  .scale-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
   .wrap { position: relative; display: grid; grid-template: auto minmax(0, 1fr) auto / auto minmax(0, 1fr); height: 100%; }
   .intervals, .chart-footer { grid-column: 1 / -1; }
   .intervals { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
@@ -1461,6 +1491,8 @@
   .row .detail b { font-weight: 500; }
   .effect-separator { display: none; }
   .row.opening > * { background: color-mix(in srgb, var(--side) 8%, var(--panel)); }
+  .row.through > * { background: color-mix(in srgb, var(--side) 16%, var(--panel)); }
+  .row:focus-visible { outline: 0; }
   .row.opening .detail { color: color-mix(in srgb, var(--ink) 70%, transparent); font-weight: 500; }
   .row .cumulative { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; min-width: 90px; }
   .cumulative b { display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.3em; font-weight: 500; white-space: normal; }

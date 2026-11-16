@@ -43,7 +43,7 @@
     { key: 'price', label: 'Price', value: (o) => o.limitPx },
     { key: 'size', label: 'Size', value: (o) => o.sz },
     { key: 'value', label: 'Value', value: valueOf },
-    { key: 'margin', label: 'Est. margin', value: (o) => orderMargin(o).value, title: 'Estimated initial margin, not an exact per-order collateral allocation.' },
+    { key: 'margin', label: 'Margin', value: (o) => orderMargin(o).value, title: 'Estimated initial margin, not an exact per-order collateral allocation.' },
     { key: 'trigger', label: 'Trigger', value: (o) => o.isTrigger && !isTrailing(o) ? o.triggerPx : null },
     { key: 'reduce', label: 'Reduce', value: (o) => Number(o.reduceOnly) }
   ], 'time', (a, b) => b.timestamp - a.timestamp || a.oid - b.oid);
@@ -139,7 +139,7 @@
             <div class="field"><span class="label">Price</span><span class="value num">{priceOf(o)}</span></div>
             <div class="field"><span class="label">Size</span><span class="value num">{sizeText(o)}</span></div>
             <div class="field"><span class="label">Value</span><span class="value num">{whole(o) ? '—' : valueText(o)}</span></div>
-            <div class="field" title={margin.note}><span class="label">Est. margin</span><span class="value num" data-testid="order-margin">{marginText(margin)}</span></div>
+            <div class="field" title={margin.note}><span class="label">Margin</span><span class="value num" data-testid="order-margin">{marginText(margin)}</span></div>
             {#if o.tif && !o.isTrigger}<div class="field"><span class="label">Time in force</span><span class="value">{o.tif}</span></div>{/if}
             <div class="field"><span class="label">Order ID</span><span class="value num">{o.oid}</span></div>
           </div>

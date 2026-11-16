@@ -178,6 +178,7 @@ export const HANDLERS: Record<ActionId, (held?: number) => unknown> = {
   chartInvert: () => chartCmd('invert'),
   toggleFills: () => { settings.chart.indicators.fills.on = !settings.chart.indicators.fills.on; persist(); },
   zen: () => setZen(!inZen()),
+  chartFull: () => chartCmd('fullscreen'),
   toggleOrder: () => toggleZenPart('order'),
   togglePositions: () => toggleZenPart('positions'),
   toggleBook: () => toggleZenPart('book'),

@@ -38,13 +38,15 @@
     located();
   });
   $effect(() => {
+    void theme; void lines;
+    if (series && dragging < 0) draw();
+  });
+  function draw() {
     if (!series) return;
-    void theme;
     for (const line of drawn) series.removePriceLine(line);
-    if (dragging >= 0) return;
     drawn = lines.map(l => series!.createPriceLine({ price: l.price, title: l.title, color: token(`--${l.tone}`), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true }));
     located();
-  });
+  }
   let dragging = -1, near = $state(false);
   /** Where each draggable line sits, for browser tests. */
   const located = () => setTimeout(() => { if (el) el.dataset.drag = lines.flatMap(l => l.key ? [`${l.key}@${Math.round(series?.priceToCoordinate(l.price) ?? -1)}`] : []).join('|'); }, 50);
@@ -67,9 +69,9 @@
   }
   function up(e: PointerEvent) {
     if (dragging < 0) return;
-    const line = lines[dragging], price = series?.coordinateToPrice(y(e)), moved = Math.abs((series?.priceToCoordinate(line.price) ?? 0) - y(e)) > 3;
-    drawn[dragging]?.applyOptions({ price: line.price });
+    const line = lines[dragging], price = series?.coordinateToPrice(y(e)), moved = !!line && Math.abs((series?.priceToCoordinate(line.price) ?? 0) - y(e)) > 3;
     dragging = -1; chart?.applyOptions({ handleScroll: true, handleScale: true });
+    draw();
     if (moved && price != null && price > 0) onmove?.(line.key!, price);
   }
 </script>

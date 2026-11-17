@@ -1447,7 +1447,7 @@
   .tag:is([data-kind=order], [data-kind=exit]) > span:not(.grip, .pnl), .tag[data-kind=position] > span:last-of-type, .tag.fill > span:not(.pnl) { color: var(--ink); }
   .tag > * { display: flex; align-items: center; justify-content: center; padding: 0 0.45em; }
   .tag > .clip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .tag > .est { color: var(--text); font-weight: 600; }
+  .tag > .est { color: var(--text); }
   .tag > .est.buy { color: var(--buy-text); }
   .tag > .est.sell { color: var(--sell-text); }
   .tag .pnl, .row .pnl { color: var(--text); }

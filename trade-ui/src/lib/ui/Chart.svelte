@@ -38,6 +38,7 @@
   import { compareLines, compareView, compared, leftWidth, toggleCompare } from './chart/compare.svelte';
   import { aiMarks, aiView } from './chart/aiMarks.svelte';
   import { agent, annotationChat, askBlocked, noAi, type Selection } from '$lib/agent/agent.svelte';
+  import { load as loadStored, save as saveStored } from '$lib/util/storage';
   import AiPanel from '$lib/ui/ai/AiPanel.svelte';
   import AnnotationChat from './ai/AnnotationChat.svelte';
   import { coach, demoLevels } from './ai/setups.svelte';
@@ -127,6 +128,23 @@
   });
   let chart = $state<IChartApi>();
   let chartWidth = $state(0);
+  const DOCK = 'trade-ui:copilot-size';
+  let dock = $state(loadStored(DOCK, { w: 0, h: 0 }));
+  let grip: { x: number; y: number; w: number; h: number } | null = null;
+  const saveDock = (size: { w: number; h: number }) => saveStored(DOCK, (dock = size));
+  function gripDown(e: PointerEvent) {
+    const box = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
+    grip = { x: e.clientX, y: e.clientY, w: box.width, h: box.height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function gripMove(e: PointerEvent) {
+    if (grip) dock = { w: Math.max(280, Math.round(grip.w + grip.x - e.clientX)), h: Math.max(180, Math.round(grip.h + e.clientY - grip.y)) };
+  }
+  function gripUp() {
+    if (grip) saveDock(dock);
+    grip = null;
+  }
   const mobileIv = new MediaQuery('(max-width: 900px), (pointer: coarse) and (max-height: 500px)');
   const pinnedIntervals = $derived(mobileIv.current ? settings.chart.pinnedIntervals : settings.chart.desktopPinnedIntervals);
   let pinCapacity = $state(0);
@@ -1187,7 +1205,7 @@
     {/each}
     {#if railFit > 0 && railFit < railItems.length}{@render moreTools()}{/if}
   </div>
-  <div class="chart" bind:this={el} bind:clientWidth={chartWidth} onwheelcapture={() => (resetShown = true)}>
+  <div class="chart" bind:this={el} bind:clientWidth={chartWidth} style:--cw={dock.w ? `${dock.w}px` : null} style:--ch={dock.h ? `${dock.h}px` : null} onwheelcapture={() => (resetShown = true)}>
     <div class="chart-refresh" class:shown={resetShown || away} style:top="{priceH - 28}px" style:left="{axisL + (chartWidth - axisL - axisW) / 2}px">      <button data-testid="chart-reset" title="Reset chart: auto-scale, default zoom, one-third blank space ({keys('chartReset')})" aria-label="Reset chart" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>⟲</button>
 </div>
     {#if retrying}<div class="retrying" data-testid="chart-retrying">retrying…</div>
@@ -1242,7 +1260,7 @@
       <button class="tag ai" data-tone={l.tone} title="Discuss this annotation" aria-label="Discuss annotation: {l.text}" onclick={() => annotationChat.markId = l.key} hidden={l.y < 0} data-testid="ai-label" data-mine={l.mine} data-key={l.key} style:left="{l.left}px" style:transform="translate3d(0,{l.y}px,0) translateY(-50%)" style:height="{aiView.height}px" style:max-width={l.max === null ? null : `min(50%, ${l.max}px)`} style:visibility={l.placed ? null : 'hidden'} bind:offsetWidth={l.w}><span>{l.text}</span></button>
     {/each}
     {#if !noAi()}<button class="copilot-launch" data-testid="chart-copilot" title="AI co-pilot: your own Claude Code, Codex or other MCP client coaches you on this chart" aria-expanded={ui.panelTab === 'ai'} onclick={(e) => { e.currentTarget.blur(); ui.panelTab = ui.panelTab === 'ai' ? 'trade' : 'ai'; }}>Co-pilot{#if agent.suggestions.length}<span>{agent.suggestions.length}</span>{/if}{#if ui.panelTab === 'ai'}<span aria-hidden="true">✕</span>{/if}</button>{/if}
-    {#if ui.panelTab === 'ai' && !noAi()}<aside class="copilot" data-testid="copilot-dock" aria-label="AI co-pilot"><AiPanel /></aside>{/if}
+    {#if ui.panelTab === 'ai' && !noAi()}<aside class="copilot" data-testid="copilot-dock" aria-label="AI co-pilot"><AiPanel /><span class="copilot-grip" data-testid="copilot-grip" role="presentation" title="Drag to resize, double-click to reset" onpointerdown={gripDown} onpointermove={gripMove} onpointerup={gripUp} onpointercancel={gripUp} ondblclick={() => saveDock({ w: 0, h: 0 })}></span></aside>{/if}
     {#if !noAi()}<AnnotationChat time={(t) => zoneFormats.full.format(t)} {collect} dock={(p) => ((candles?.priceToCoordinate(p) ?? 0) > priceH / 2 ? 'top' : 'bottom')} />{/if}
     {#each lineLabels.groups as g (g.rows[0].key)}
       {@const open = lineLabels.open === g.key}
@@ -1335,8 +1353,10 @@
   .copilot-launch:hover { color: var(--bright); }
   .copilot-launch[aria-expanded='true'], .copilot-launch span { color: var(--accent); }
   .chart :global(.annotation-chat.top) { top: 40px; }
-  .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 48px); width: min(340px, calc(100% - var(--axis-w, 0px) - 16px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
-  .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + 356px), 12px + 50%); }
+  .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 48px); width: min(var(--cw, 340px), calc(100% - var(--axis-w, 0px) - 16px)); height: var(--ch, auto); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + var(--cw, 340px) + 16px), 12px + 50%); }
+  .copilot-grip { position: absolute; left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; touch-action: none; border-left: 1px solid var(--dim); border-bottom: 1px solid var(--dim); border-bottom-left-radius: var(--radius); opacity: 0.5; }
+  .copilot-grip:hover { opacity: 1; }
   .chart-refresh { position: absolute; z-index: 2; transform: translateX(-50%); opacity: 0; visibility: hidden; transition: opacity 0.15s, visibility 0.15s; }
   .chart-refresh.shown, .chart-refresh:focus-within { opacity: 1; visibility: visible; }
   .chart-refresh button { width: 20px; height: 20px; min-width: 0; min-height: 0; padding: 0; border-radius: 0; border: 0; background: none; color: var(--dim); font-size: 16px; line-height: 1; }

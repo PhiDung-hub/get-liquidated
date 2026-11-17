@@ -64,17 +64,17 @@
   .msg { align-self: stretch; display: grid; grid-template-columns: auto auto minmax(0, 1fr); column-gap: 1ch; align-items: baseline; min-width: 0; }
   time, .glyph { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   time { color: var(--dim); font-size: max(8px, 0.917em); }
-  .glyph, .mk, .num { color: var(--accent); }
-  .ai .glyph { color: var(--buy); }
+  .glyph, .mk { color: var(--dim); }
+  .num { font-variant-numeric: tabular-nums; }
+  .ai .glyph { color: var(--accent); }
   .system .glyph, .system .text { color: var(--dim); }
   .body { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
   .text { margin: 0; max-width: 100%; line-height: 1.5; }
   p.text { white-space: pre-wrap; }
-  .ai .text { color: var(--bright); }
   .gap { margin-top: 0.6em; }
   .li { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 1ch; }
   .mk { font-family: var(--mono); }
-  strong { font-weight: 700; }
+  strong { font-weight: 600; color: var(--bright); }
   code, pre { font-family: var(--mono); }
   pre { margin: 4px 0; white-space: pre-wrap; }
   pre.gap { margin-top: 0.6em; }

@@ -72,3 +72,11 @@ export function positionPnl(row: unknown) {
   const points = p.direction === 'BUY' ? exit - level : level - exit, contract = numeric(p.contractSize), scale = numeric(m.scalingFactor) || 1;
   return { points, value: contract === null ? null : points * size * contract / scale, exit };
 }
+/** IG fills a limit at the level or better and a stop at the level or worse, so the side of the quote the level sits on decides the type. */
+export const orderKind = (buy: boolean, level: number, m: Market) => (buy ? level < (m.offer ?? 0) : level > (m.bid ?? Infinity)) ? 'LIMIT' : 'STOP';
+/** Why a position's stop or limit level cannot be set against the current quote, or '' when it can. */
+export function levelError(buy: boolean, stop: number | null, limit: number | null, bid: number, offer: number) {
+  if (stop !== null && (buy ? stop >= bid : stop <= offer)) return `A ${buy ? 'long' : 'short'} position's stop must be ${buy ? 'below the sell' : 'above the buy'} price.`;
+  if (limit !== null && (buy ? limit <= offer : limit >= bid)) return `A ${buy ? 'long' : 'short'} position's limit must be ${buy ? 'above the buy' : 'below the sell'} price.`;
+  return '';
+}

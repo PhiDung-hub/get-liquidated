@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { array, barsOf, eligibleAccount, fresh, HISTORY, isResolution, liveBar, marketOf, mergeBars, numeric, positionPnl, record, RESOLUTIONS, spread, spreadBps, text, type Bar, type Detail, type Market, type Resolution, type Session } from '$lib/ig/markets';
+  import { array, barsOf, eligibleAccount, fresh, HISTORY, isResolution, levelError, liveBar, marketOf, mergeBars, orderKind, numeric, positionPnl, record, RESOLUTIONS, spread, spreadBps, text, type Bar, type Detail, type Market, type Resolution, type Session } from '$lib/ig/markets';
   import IgChart, { type Line } from '$lib/ig/IgChart.svelte';
   import ThemePicker from '$lib/ui/ThemePicker.svelte';
   import { THEMES } from '$lib/settings/themes';
@@ -13,7 +13,8 @@
     constructor(status: number, message: string, deliveryStatus = '') { super(message); this.status = status; this.deliveryStatus = deliveryStatus; }
   }
   type Pending = { id: string; accountId: string; environment: 'live'; reference?: string; status: string; message: string };
-  type Draft = { direction: 'BUY' | 'SELL'; size: string; currency: string; stop: string; takeProfit: string };
+  type Draft = { direction: 'BUY' | 'SELL'; size: string; currency: string; stop: string; takeProfit: string; level: string };
+  type Deal = { time: string; name: string; size: string; open: string; close: string; pnl: string };
   type View = { market: Market; detail: Detail | null; res: Resolution; bars: Bar[]; live: Bar | null; pricesAt: number; at: number; busy: boolean; tried: boolean; note: string; draft: Draft | null };
   const MAX_VIEWS = 8, GRID = 4, MAX_WATCH = 50, MAX_CACHED = 12, AVERAGES = [7, 30, 99], POLL = 12_000;
   let connection = 0, browseRequest = 0, hydrated = $state(false);
@@ -49,7 +50,8 @@
     const first = views.slice(0, GRID);
     return !view || first.includes(view) ? first : [...first.slice(0, GRID - 1), view];
   });
-  let direction = $state<'BUY' | 'SELL'>('BUY'), size = $state(''), currency = $state('SGD'), stop = $state(''), takeProfit = $state('');
+  let direction = $state<'BUY' | 'SELL'>('BUY'), size = $state(''), currency = $state('SGD'), stop = $state(''), takeProfit = $state(''), level = $state('');
+  const kind = $derived(level.trim() && selected && Number(level) > 0 ? orderKind(direction === 'BUY', Number(level), selected.market) : '');
   let hotkeySizes = $state<Record<string, string>>({});
   const hotkeySize = $derived(selected ? hotkeySizes[selected.market.epic] ?? '' : '');
   const validSize = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) <= 1e9;
@@ -57,6 +59,15 @@
   let reconcile = $state(false), reconciled = $state(false);
   let review = $state(false), sending = $state(false), pending = $state<Pending | null>(null);
   let positions = $state<Record<string, any>[]>([]), closing = $state<Record<string, any> | null>(null);
+  let orders = $state<Record<string, any>[]>([]), deals = $state<Deal[] | null>(null), bottom = $state<'positions' | 'orders' | 'history'>('positions');
+  let editing = $state<{ row: Record<string, any>; stop: string; limit: string } | null>(null);
+  const editLevel = (v: string) => v.trim() ? Number(v) : null;
+  const editError = $derived.by(() => {
+    if (!editing) return '';
+    const p = record(editing.row.position), m = record(editing.row.market), stopLevel = editLevel(editing.stop), limitLevel = editLevel(editing.limit), bid = numeric(m.bid), offer = numeric(m.offer);
+    if ([stopLevel, limitLevel].some(v => v !== null && !(v > 0))) return 'Levels must be positive prices.';
+    return bid === null || offer === null ? 'Refresh positions for a current quote.' : levelError(p.direction === 'BUY', stopLevel, limitLevel, bid, offer);
+  });
   let phoneTab = $state('chart');
   const phoneTabs = [['chart', 'Chart'], ['markets', 'Markets'], ['trade', 'Trade'], ['positions', 'Positions']] as const;
   let theme = $state('hyperliquid'), searchEl: HTMLInputElement;
@@ -71,7 +82,7 @@
     return score(a) - score(b) || a.name.localeCompare(b.name);
   }));
   const best = $derived(ranking === 'bps' ? rows.find(m => fresh(m, now))?.epic : undefined);
-  const invalid = $derived(!eligibleAccount(account) ? 'Select an enabled SGD CFD account.' : !selected ? 'Select a market.' : !fresh(selected.market, now) ? 'Refresh this market for a current, undelayed quote.' : !selected.marketOrders ? 'IG does not allow market orders for this instrument.' : selected.minSize === null ? 'IG has not supplied a supported minimum size.' : !selected.currencies.includes(currency) ? 'Choose an available dealing currency.' : !(Number(size) >= selected.minSize && Number(size) > 0) ? `Minimum size is ${selected.minSize}.` : (stop && !(Number(stop) > 0)) || (takeProfit && !(Number(takeProfit) > 0)) ? 'Stop and limit distances must be positive.' : '');
+  const invalid = $derived(!eligibleAccount(account) ? 'Select an enabled SGD CFD account.' : !selected ? 'Select a market.' : !fresh(selected.market, now) ? 'Refresh this market for a current, undelayed quote.' : level.trim() && !(Number(level) > 0) ? 'Order level must be a positive price.' : !level.trim() && !selected.marketOrders ? 'IG does not allow market orders for this instrument. Set an order level.' : selected.minSize === null ? 'IG has not supplied a supported minimum size.' : !selected.currencies.includes(currency) ? 'Choose an available dealing currency.' : !(Number(size) >= selected.minSize && Number(size) > 0) ? `Minimum size is ${selected.minSize}.` : (stop && !(Number(stop) > 0)) || (takeProfit && !(Number(takeProfit) > 0)) ? 'Stop and limit distances must be positive.' : '');
   const number = (n: number | null | undefined, decimals = 2) => n == null ? '—' : fmtNum(n, decimals);
   const quoteFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 10 });
   const quote = (n: number | null | undefined) => n == null ? '—' : quoteFormat.format(n);
@@ -93,11 +104,11 @@
     watchlist = watched(m.epic) ? watchlist.filter(w => w.epic !== m.epic) : [...watchlist, m].slice(-MAX_WATCH);
     save('ig:watchlist', watchlist.map(lite));
   }
-  const defaults = (d: Detail | null): Draft => ({ direction: 'BUY', size: d?.minSize?.toString() ?? '', currency: d?.currencies.includes('SGD') ? 'SGD' : d?.currencies[0] ?? 'SGD', stop: '', takeProfit: '' });
-  function setDraft(d: Draft) { direction = d.direction; size = d.size; currency = d.currency; stop = d.stop; takeProfit = d.takeProfit; }
+  const defaults = (d: Detail | null): Draft => ({ direction: 'BUY', size: d?.minSize?.toString() ?? '', currency: d?.currencies.includes('SGD') ? 'SGD' : d?.currencies[0] ?? 'SGD', stop: '', takeProfit: '', level: '' });
+  function setDraft(d: Draft) { direction = d.direction; size = d.size; currency = d.currency; stop = d.stop; takeProfit = d.takeProfit; level = d.level ?? ''; }
   function activate(epic: string) {
     if (epic !== active) {
-      if (view) view.draft = { direction, size, currency, stop, takeProfit };
+      if (view) view.draft = { direction, size, currency, stop, takeProfit, level };
       active = epic; review = false; error = '';
       const next = view;
       setDraft(next?.draft ?? defaults(next?.detail ?? null));
@@ -126,16 +137,20 @@
   }
   const money = (value: number | null, currency: unknown) => value === null ? '—' : `${value < 0 ? '−' : '+'}${text(currency)} ${fmtNum(Math.abs(value), 2)}`;
   function linesOf(epic: string): Line[] {
-    return positions.filter(row => record(row.market).epic === epic).flatMap(row => {
+    const working = orders.filter(row => record(row.marketData).epic === epic).flatMap(row => {
+      const o = record(row.workingOrderData), price = numeric(o.orderLevel);
+      return price === null ? [] : [{ price, title: `${o.direction === 'BUY' ? 'Buy' : 'Sell'} ${text(o.orderType).toLowerCase()} ${quote(numeric(o.orderSize))}`, tone: 'dim' as const }];
+    });
+    return [...working, ...positions.filter(row => record(row.market).epic === epic).flatMap(row => {
       const p = record(row.position), pnl = positionPnl(row), level = numeric(p.level), stop = numeric(p.stopLevel), limit = numeric(p.limitLevel);
       const entry: Line[] = level === null ? [] : [{ price: level, title: `${p.direction === 'BUY' ? '+' : '−'}${quote(numeric(p.size))} · ${money(pnl?.value ?? null, p.currency)}`, tone: (pnl?.points ?? 0) < 0 ? 'sell' : 'buy' }];
       return [...entry, ...(stop === null ? [] : [{ price: stop, title: 'Stop', tone: 'sell' as const }]), ...(limit === null ? [] : [{ price: limit, title: 'Limit', tone: 'buy' as const }])];
-    });
+    })];
   }
   function openMarket(m: Market) {
     phoneTab = 'chart';
     if (!views.some(v => v.market.epic === m.epic)) {
-      if (view) view.draft = { direction, size, currency, stop, takeProfit };
+      if (view) view.draft = { direction, size, currency, stop, takeProfit, level };
       const slot = views.findIndex(v => v.market.epic === active);
       if (views.length < MAX_VIEWS) views.push(newView(m));
       else views[slot < 0 ? MAX_VIEWS - 1 : slot] = newView(m);
@@ -182,7 +197,7 @@
       v.detail = detail; v.market = detail.market; v.at = Date.now(); noteQuotes([detail.market]);
       const initial = defaults(detail), fill = (d: Draft): Draft => ({ ...d, size: d.size.trim() ? d.size : initial.size, currency: detail.currencies.includes(d.currency) ? d.currency : initial.currency });
       if (epic !== active) v.draft = fill(v.draft ?? initial);
-      else setDraft(fill({ direction, size, currency, stop, takeProfit }));
+      else setDraft(fill({ direction, size, currency, stop, takeProfit, level }));
       tick(v);
       if (v.res !== res || (v.bars.length && Date.now() - v.pricesAt < Math.max(step, 900) * 1000)) return;
       const known = v.bars.length ? $state.snapshot(v.bars) : cachedBars(epic, res), last = known.at(-1)?.time;
@@ -212,14 +227,14 @@
   function tradeHotkey(e: KeyboardEvent) {
     if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || isTyping(e.target) || isTyping(document.activeElement)) return;
     const side = e.key.toLowerCase();
-    if (!['b', 's'].includes(side) || document.hidden || !connected || !selected || loading || busyMarket || sending || pending || login || review || closing || reconcile || document.querySelector('[role=dialog], [role=menu], details.theme[open], [aria-label="Theme choices"]')) return;
+    if (!['b', 's'].includes(side) || document.hidden || !connected || !selected || loading || busyMarket || sending || pending || login || review || closing || editing || reconcile || document.querySelector('[role=dialog], [role=menu], details.theme[open], [aria-label="Theme choices"]')) return;
     e.preventDefault(); phoneTab = 'trade';
     if (hotkeyError) { error = hotkeyError; document.querySelector<HTMLInputElement>('[data-testid="ig-hotkey-size"]')?.focus(); return; }
     direction = side === 'b' ? 'BUY' : 'SELL'; size = hotkeySize;
     if (invalid) { error = invalid; return; }
     error = ''; review = true;
   }
-  function signedOut() { connection++; browseRequest++; session = null; connected = false; views = []; active = ''; quotes = {}; positions = []; review = false; closing = null; reconcile = false; setDraft(defaults(null)); }
+  function signedOut() { connection++; browseRequest++; session = null; connected = false; views = []; active = ''; quotes = {}; positions = []; orders = []; deals = null; review = false; closing = null; editing = null; reconcile = false; setDraft(defaults(null)); }
   async function api<T>(path: string, method = 'GET', value: unknown = undefined): Promise<T> {
     const epoch = connection;
     const response = await fetch(`/api/ig/${path}`, { method, credentials: 'same-origin', headers: value ? { 'content-type': 'application/json' } : {}, ...(value ? { body: JSON.stringify(value) } : {}) });
@@ -240,13 +255,14 @@
     const epoch = connection;
     const next = await api<Session>('session');
     const nextPositions = array(record(await api('positions')).positions).map(record);
+    const nextOrders = array(record(await api('orders')).workingOrders).map(record);
     if (epoch !== connection) return;
-    session = next; positions = nextPositions; connected = true;
+    session = next; positions = nextPositions; orders = nextOrders; connected = true;
     noteQuotes(nextPositions.flatMap(row => marketOf(row.market) ?? []));
   }
   let beat = 0;
   function poll() {
-    if (document.hidden || !connected || loading || sending || login || review || closing) return;
+    if (document.hidden || !connected || loading || sending || login || review || closing || editing) return;
     if (view && !view.busy) void loadView(active);
     if (++beat % 3 === 0) refreshAccount().catch(() => {});
   }
@@ -258,7 +274,7 @@
       if (epoch !== connection) return;
       session = next;
       apiKey = ''; connected = true; login = false; notice = '';
-      positions = array(record(await api('positions')).positions).map(record);
+      await refreshAccount();
       restoreWorkspace();
       await browse();
     });
@@ -314,7 +330,7 @@
     const intent = { accountId: session!.accountId, environment: session!.environment };
     pending = { id, ...intent, reference: id, status: 'sending', message: 'Sending to IG…' };
     try {
-      const result = await api<{ status: string; reference?: string; error?: string }>('order', 'POST', { id, ...intent, epic: selected.market.epic, direction, size: Number(size), currency, ...(stop ? { stopDistance: Number(stop) } : {}), ...(takeProfit ? { limitDistance: Number(takeProfit) } : {}) });
+      const result = await api<{ status: string; reference?: string; error?: string }>('order', 'POST', { id, ...intent, epic: selected.market.epic, direction, size: Number(size), currency, ...(stop ? { stopDistance: Number(stop) } : {}), ...(takeProfit ? { limitDistance: Number(takeProfit) } : {}), ...(level.trim() ? { level: Number(level) } : {}) });
       pending = { id, ...intent, reference: result.reference, status: result.status, message: result.error || 'Submitted to IG; execution has not yet been confirmed.' };
       if (result.reference) await confirm();
     } catch (e) { const refused = e instanceof ApiError && e.deliveryStatus === 'not-submitted'; pending = { id, ...intent, ...(refused ? {} : { reference: id }), status: refused ? 'not-submitted' : 'unconfirmed', message: e instanceof Error ? e.message : 'Delivery unconfirmed. Check IG before trying again.' }; } finally { sending = false; }
@@ -330,16 +346,23 @@
       try { await refreshAccount(); } catch (e) { error = e instanceof Error ? e.message : 'Could not refresh positions'; }
     } catch (e) { pending = { ...item, status: 'unconfirmed', message: `${e instanceof Error ? e.message : 'Confirmation unavailable'}. Check IG before submitting again.` }; }
   }
-  async function closePosition() {
-    if (!closing || sending || pending) return;
-    const p = record(closing.position), id = crypto.randomUUID().replaceAll('-', '').slice(0, 26);
-    const intent = { accountId: session!.accountId, environment: session!.environment };
-    sending = true; pending = { id, ...intent, status: 'sending', message: 'Sending close request…' }; closing = null;
+  async function deliver(path: 'close' | 'edit' | 'cancel', payload: Record<string, unknown>, what: string) {
+    if (sending || pending) return;
+    const id = crypto.randomUUID().replaceAll('-', '').slice(0, 26), intent = { accountId: session!.accountId, environment: session!.environment };
+    sending = true; pending = { id, ...intent, status: 'sending', message: `Sending ${what} request…` }; closing = null; editing = null;
     try {
-      const result = await api<{ status: string; reference?: string; error?: string }>('close', 'POST', { id, ...intent, dealId: p.dealId, size: p.size });
-      pending = { id, ...intent, status: result.status, reference: result.reference, message: result.error || 'Close submitted; awaiting IG confirmation.' };
+      const result = await api<{ status: string; reference?: string; error?: string }>(path, 'POST', { id, ...intent, ...payload });
+      pending = { id, ...intent, status: result.status, reference: result.reference, message: result.error || `${what[0].toUpperCase()}${what.slice(1)} submitted; awaiting IG confirmation.` };
       if (result.reference) await confirm();
-    } catch (e) { pending = { id, ...intent, status: e instanceof ApiError && e.deliveryStatus === 'not-submitted' ? 'not-submitted' : 'unconfirmed', message: e instanceof Error ? e.message : 'Close delivery unconfirmed. Inspect your IG position.' }; } finally { sending = false; }
+    } catch (e) { pending = { id, ...intent, status: e instanceof ApiError && e.deliveryStatus === 'not-submitted' ? 'not-submitted' : 'unconfirmed', message: e instanceof Error ? e.message : `${what} delivery unconfirmed. Inspect your IG account.` }; } finally { sending = false; }
+  }
+  const closePosition = () => closing && deliver('close', { dealId: record(closing.position).dealId, size: record(closing.position).size }, 'close');
+  const editPosition = () => editing && !editError && deliver('edit', { dealId: record(editing.row.position).dealId, stopLevel: editLevel(editing.stop), limitLevel: editLevel(editing.limit) }, 'edit');
+  const startEdit = (row: Record<string, any>) => editing = { row, stop: numeric(record(row.position).stopLevel)?.toString() ?? '', limit: numeric(record(row.position).limitLevel)?.toString() ?? '' };
+  async function showBottom(tab: typeof bottom) {
+    bottom = tab;
+    if (tab === 'history') await run(async () => { deals = (await api<{ transactions: Deal[] }>('history')).transactions; });
+    else await run(refreshAccount);
   }
   function clearUncertain() {
     if (!reconciled || pending?.status !== 'unconfirmed' || pending.accountId !== session?.accountId || pending.environment !== session?.environment) return;
@@ -435,15 +458,18 @@
           <div class="chart-wrap" role="presentation" onpointerdown={() => grid && !review && !sending && activate(m.epic)}><IgChart bars={v.bars} live={v.live} {theme} epic={m.epic} scope={v.res} averages={averages ? AVERAGES : []} lines={linesOf(m.epic)} />{@render chartNote(v)}</div>
         </div>{:else}<div class="tile"><div class="chart-wrap"><IgChart bars={[]} {theme} />{@render chartNote(undefined)}</div></div>{/each}
       </div>
-      <div class="positions" id="ig-panel-positions" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-positions"><div class="section-title"><h2>Positions <span class="count">{positions.length || ''}</span></h2><button class="ui-tab" disabled={!connected || loading} onclick={() => run(refreshAccount)}>Refresh</button></div><div class="position-table"><table><thead><tr><th>Market</th><th>Direction</th><th>Size</th><th>Entry</th><th>Latest</th><th title="Estimated from the latest quote IG sent with the position, in its dealing currency. IG's own figure is authoritative.">P&amp;L</th><th>Stop</th><th>Limit</th><th></th></tr></thead><tbody>{#each positions as row}{@const pm = marketOf(row.market)}{@const pnl = positionPnl(row)}<tr data-testid="ig-position"><td>{#if pm}<button class="market-name" title="Open chart" onclick={() => openMarket(quotes[pm.epic] ?? pm)}>{pm.name}</button>{:else}{record(row.market).instrumentName}{/if}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction === 'SELL' ? '−' : '+'}{quote(numeric(record(row.position).size))}</td><td>{quote(numeric(record(row.position).level))}</td><td>{quote(pnl?.exit)}</td><td class="num" class:buy={(pnl?.points ?? 0) > 0} class:sell={(pnl?.points ?? 0) < 0}>{pnl?.value == null ? record(row.position).currency : money(pnl.value, record(row.position).currency)}{#if pnl}<small>{pnl.points < 0 ? '−' : '+'}{quote(Math.abs(pnl.points))} pts</small>{/if}</td><td>{quote(numeric(record(row.position).stopLevel))}</td><td>{quote(numeric(record(row.position).limitLevel))}</td><td><button class="ui-tab" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => closing = row}>Close</button></td></tr>{/each}</tbody></table></div>{#if !positions.length}<p class="empty">{connected ? 'No open positions returned by IG.' : 'Your positions appear after connecting.'}</p>{/if}</div>
+      <div class="positions" id="ig-panel-positions" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-positions"><div class="section-title"><div class="sources" role="tablist" aria-label="Account activity" tabindex="-1" onkeydown={tabNavigation}>{#each [['positions', 'Positions', positions.length], ['orders', 'Orders', orders.length], ['history', 'History', 0]] as const as [id, label, count]}<button class="ui-tab" role="tab" data-testid="ig-bottom-{id}" aria-selected={bottom === id} tabindex={bottom === id ? 0 : -1} disabled={!connected || loading} onclick={() => showBottom(id)}>{label} <span class="count">{count || ''}</span></button>{/each}</div><button class="ui-tab" disabled={!connected || loading} onclick={() => showBottom(bottom)}>Refresh</button></div>
+        {#if bottom === 'positions'}<div class="position-table"><table><thead><tr><th>Market</th><th>Direction</th><th>Size</th><th>Entry</th><th>Latest</th><th title="Estimated from the latest quote IG sent with the position, in its dealing currency. IG's own figure is authoritative.">P&amp;L</th><th>Stop</th><th>Limit</th><th></th></tr></thead><tbody>{#each positions as row}{@const pm = marketOf(row.market)}{@const pnl = positionPnl(row)}<tr data-testid="ig-position"><td>{#if pm}<button class="market-name" title="Open chart" onclick={() => openMarket(quotes[pm.epic] ?? pm)}>{pm.name}</button>{:else}{record(row.market).instrumentName}{/if}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction === 'SELL' ? '−' : '+'}{quote(numeric(record(row.position).size))}</td><td>{quote(numeric(record(row.position).level))}</td><td>{quote(pnl?.exit)}</td><td class="num" class:buy={(pnl?.points ?? 0) > 0} class:sell={(pnl?.points ?? 0) < 0}>{pnl?.value == null ? record(row.position).currency : money(pnl.value, record(row.position).currency)}{#if pnl}<small>{pnl.points < 0 ? '−' : '+'}{quote(Math.abs(pnl.points))} pts</small>{/if}</td>{#each ['stopLevel', 'limitLevel'] as field}<td><button class="ui-tab level" title="Edit stop and limit" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => startEdit(row)}>{numeric(record(row.position)[field]) === null ? 'Add' : quote(numeric(record(row.position)[field]))}</button></td>{/each}<td><button class="ui-tab phone-edit" aria-label="Edit stop and limit" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => startEdit(row)}>✎</button><button class="ui-tab" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => closing = row}>Close</button></td></tr>{/each}</tbody></table></div>{#if !positions.length}<p class="empty">{connected ? 'No open positions returned by IG.' : 'Your positions appear after connecting.'}</p>{/if}
+        {:else if bottom === 'orders'}<div class="position-table orders"><table><thead><tr><th>Market</th><th>Order</th><th>Size</th><th>Level</th><th>Latest</th><th>Stop / limit</th><th></th></tr></thead><tbody>{#each orders as row}{@const o = record(row.workingOrderData)}{@const m = record(row.marketData)}<tr data-testid="ig-order"><td>{m.instrumentName}</td><td class:buy={o.direction === 'BUY'} class:sell={o.direction === 'SELL'}>{o.direction === 'BUY' ? 'Buy' : 'Sell'} {text(o.orderType).toLowerCase()}</td><td>{quote(numeric(o.orderSize))}</td><td>{quote(numeric(o.orderLevel))}</td><td>{quote(numeric(o.direction === 'BUY' ? m.offer : m.bid))}</td><td>{quote(numeric(o.stopDistance))} / {quote(numeric(o.limitDistance))} pts</td><td><button class="ui-tab" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => deliver('cancel', { dealId: o.dealId }, 'cancel')}>Cancel</button></td></tr>{/each}</tbody></table></div>{#if !orders.length}<p class="empty">{connected ? 'No working orders.' : 'Your orders appear after connecting.'}</p>{/if}
+        {:else}<div class="position-table history"><table><thead><tr><th>Market</th><th>Closed (UTC)</th><th>Size</th><th>Opening</th><th>Closing</th><th>P&amp;L</th></tr></thead><tbody>{#each deals ?? [] as d}<tr data-testid="ig-deal"><td>{d.name}</td><td>{d.time.replace('T', ' ').slice(0, 16)}</td><td>{d.size}</td><td>{d.open}</td><td>{d.close}</td><td class="num" class:sell={/[-−]/.test(d.pnl)} class:buy={!/[-−]/.test(d.pnl)}>{d.pnl}</td></tr>{/each}</tbody></table></div>{#if !deals?.length}<p class="empty">{deals ? 'No closed deals in the last 7 days.' : 'Loading history…'}</p>{/if}{/if}</div>
     </section>
-    <div class="ticket" id="ig-panel-trade" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-trade"><div class="ticket-head"><h2>Trade</h2><span data-testid="ig-ticket-market">{selected?.market.name ?? view?.market.name ?? 'No market selected'}</span></div><div class="side"><button class="ui-tab buy" aria-pressed={direction === 'BUY'} onclick={() => { direction = 'BUY'; review = false; }}>Buy {number(selected?.market.offer, 4)}</button><button class="ui-tab sell" aria-pressed={direction === 'SELL'} onclick={() => { direction = 'SELL'; review = false; }}>Sell {number(selected?.market.bid, 4)}</button></div><p class="explain">Market order · Fill or kill · Opens a separate position</p><label>Size <span>{selected?.unit.toLowerCase() || 'IG units'}</span><input class="ui-field" data-testid="ig-size" inputmode="decimal" bind:value={size} oninput={() => review = false} /></label><label>B / S size <span>{selected?.unit.toLowerCase() || "IG units"}</span><input class="ui-field" data-testid="ig-hotkey-size" aria-label="B / S size" aria-describedby="ig-hotkey-help" inputmode="decimal" value={hotkeySize} disabled={!selected} oninput={e => setHotkeySize(e.currentTarget.value)} placeholder="Set size for this market" /></label><p class="explain" id="ig-hotkey-help">B buys · S sells · Opens review for the active market with its saved size.{selected && hotkeyError ? ` ${hotkeyError}` : ''}</p><label>Dealing currency<select bind:value={currency} onchange={() => review = false}>{#each selected?.currencies ?? ['SGD'] as c}<option value={c}>{c}</option>{/each}</select></label><label>Stop distance <span>optional · points</span><input class="ui-field" inputmode="decimal" bind:value={stop} oninput={() => review = false} /></label><label>Take-profit distance <span>optional · points</span><input class="ui-field" inputmode="decimal" bind:value={takeProfit} oninput={() => review = false} /></label><dl><dt>Account currency</dt><dd>{account?.currency || '—'}</dd><dt>Spread</dt><dd>{selected ? quote(spread(selected.market)) : '—'} points</dd><dt>Relative spread</dt><dd>{selected ? number(spreadBps(selected.market)) : '—'} bps</dd><dt>Quote</dt><dd>{selected ? quoteAge(selected.market) : '—'}</dd></dl><p class="explain">Margin, fees and currency conversion follow IG’s rates. Stops are not guaranteed.</p>{#if invalid}<p class="explain" data-testid="ig-ticket-reason">{invalid}</p>{/if}<button class="review" data-testid="ig-review" disabled={!!invalid || busyMarket || sending || !!pending} onclick={() => review = true}>Review {direction === 'BUY' ? 'buy' : 'sell'}</button>
+    <div class="ticket" id="ig-panel-trade" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-trade"><div class="ticket-head"><h2>Trade</h2><span data-testid="ig-ticket-market">{selected?.market.name ?? view?.market.name ?? 'No market selected'}</span></div><div class="side"><button class="ui-tab buy" aria-pressed={direction === 'BUY'} onclick={() => { direction = 'BUY'; review = false; }}>Buy {number(selected?.market.offer, 4)}</button><button class="ui-tab sell" aria-pressed={direction === 'SELL'} onclick={() => { direction = 'SELL'; review = false; }}>Sell {number(selected?.market.bid, 4)}</button></div><p class="explain" data-testid="ig-order-kind">{kind ? `${kind === 'LIMIT' ? 'Limit' : 'Stop'} order · Good till cancelled` : 'Market order · Fill or kill'} · Opens a separate position</p><label>Size <span>{selected?.unit.toLowerCase() || 'IG units'}</span><input class="ui-field" data-testid="ig-size" inputmode="decimal" bind:value={size} oninput={() => review = false} /></label><label>B / S size <span>{selected?.unit.toLowerCase() || "IG units"}</span><input class="ui-field" data-testid="ig-hotkey-size" aria-label="B / S size" aria-describedby="ig-hotkey-help" inputmode="decimal" value={hotkeySize} disabled={!selected} oninput={e => setHotkeySize(e.currentTarget.value)} placeholder="Set size for this market" /></label><p class="explain" id="ig-hotkey-help">B buys · S sells · Opens review for the active market with its saved size.{selected && hotkeyError ? ` ${hotkeyError}` : ''}</p><label>Dealing currency<select bind:value={currency} onchange={() => review = false}>{#each selected?.currencies ?? ['SGD'] as c}<option value={c}>{c}</option>{/each}</select></label><label>Order level <span>optional · empty deals at market</span><input class="ui-field" data-testid="ig-level" inputmode="decimal" bind:value={level} oninput={() => review = false} /></label><div class="pair"><label>Stop distance <span>pts</span><input class="ui-field" inputmode="decimal" bind:value={stop} oninput={() => review = false} /></label><label>Take profit <span>pts</span><input class="ui-field" inputmode="decimal" bind:value={takeProfit} oninput={() => review = false} /></label></div><dl><dt>Account currency</dt><dd>{account?.currency || '—'}</dd><dt>Spread</dt><dd>{selected ? quote(spread(selected.market)) : '—'} points</dd><dt>Relative spread</dt><dd>{selected ? number(spreadBps(selected.market)) : '—'} bps</dd><dt>Quote</dt><dd>{selected ? quoteAge(selected.market) : '—'}</dd></dl><p class="explain">Margin, fees and currency conversion follow IG’s rates. Stops are not guaranteed.</p>{#if invalid}<p class="explain" data-testid="ig-ticket-reason">{invalid}</p>{/if}<button class="review" data-testid="ig-review" disabled={!!invalid || busyMarket || sending || !!pending} onclick={() => review = true}>Review {direction === 'BUY' ? 'buy' : 'sell'}</button>
       {#if pending}<div class="delivery" role="status" data-testid="ig-delivery"><strong>{pending.status.replaceAll('-', ' ')}</strong><small>{pending.environment} · {pending.accountId}</small><p>{pending.message}</p>{#if pending.reference}<small>Reference {pending.reference}</small>{/if}{#if ['accepted', 'rejected', 'not-submitted'].includes(pending.status)}<button class="ui-tab" onclick={() => pending = null}>Done</button>{:else if pending.reference}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={confirm}>Check confirmation</button>{:else if pending.status === 'unconfirmed'}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={() => { reconciled = false; reconcile = true; }}>Reconcile in IG</button>{/if}</div>{/if}
     </div>
   </main>
   <footer><span>IG CFD · {connected ? `${session?.environment} · ${account?.currency || 'Select account'}` : 'Disconnected'}</span><span>{#if allowance?.remaining != null}<span data-testid="ig-allowance" title="IG's weekly allowance of historical price points for this API key. Each bar loaded uses one.">Price history {fmtNum(allowance.remaining, 0)}{allowance.total ? ` / ${fmtNum(allowance.total, 0)}` : ''} left</span>{' · '}{/if}Quotes refresh every {POLL / 1000}s · No automatic order retries</span></footer>
 </div>
-{#if login || review || closing || reconcile}<div class="scrim"><div class="dialog ui-menu" class:login-dialog={login} onkeydown={dialogKey} {@attach focusLogin} role="dialog" tabindex="-1" aria-modal="true" aria-label={login ? keySetup ? 'IG API key' : 'Connect IG' : closing ? 'Close position' : reconcile ? 'Reconcile IG request' : 'Review IG order'}>
+{#if login || review || closing || editing || reconcile}<div class="scrim"><div class="dialog ui-menu" class:login-dialog={login} onkeydown={dialogKey} {@attach focusLogin} role="dialog" tabindex="-1" aria-modal="true" aria-label={login ? keySetup ? 'IG API key' : 'Connect IG' : closing ? 'Close position' : editing ? 'Edit stop and limit' : reconcile ? 'Reconcile IG request' : 'Review IG order'}>
   {#if login && keySetup}
     <div class="login-heading"><div><h2>IG API key</h2><p>Set up API access separately from your account login.</p></div><button class="ui-tab" aria-label="Close API key dialog" disabled={loading} onclick={closeLogin}>✕</button></div>
     <form class="login-form" onsubmit={e => { e.preventDefault(); void saveKey(); }}>
@@ -463,7 +489,7 @@
       {#if error}<p class="login-error" role="alert" {@attach node => node.scrollIntoView({ block: 'nearest' })}>{error}</p>{/if}
       <div class="actions"><button type="button" class="ui-tab" disabled={loading} onclick={closeLogin}>Cancel</button><button class="connect-button" disabled={loading || !keyConfigured || !identifier || !password || !!usernameError}>{loading ? 'Connecting…' : 'Connect live'}</button></div>
     </form>
-  {:else if reconcile && pending}<h2>Reconcile IG request</h2><p>Open IG separately and inspect positions and activity history for <strong>{pending.accountId} · {pending.environment}</strong>. Confirm that this request has finished processing and your account reflects its outcome. If it is still uncertain, keep the request pending.</p><p>Request {pending.id}. Clearing this notice does not confirm execution or resend the request.</p><label class="reconcile-check"><input type="checkbox" bind:checked={reconciled} /> I checked this account in IG and reconciled the request.</label><div class="actions"><button class="ui-tab" onclick={() => reconcile = false}>Keep pending</button><button disabled={!reconciled || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={clearUncertain}>Mark reconciled</button></div>{:else if closing}<h2>Close position</h2><p>Close {number(numeric(record(closing.position).size), 4)} of {record(closing.market).instrumentName} at the available market price on your {session?.environment} account?</p><div class="actions"><button class="ui-tab" onclick={() => closing = null}>Cancel</button><button disabled={sending || !!pending} onclick={closePosition}>Confirm close</button></div>{:else}<h2>Review {direction.toLowerCase()}</h2><p>{selected?.market.name}</p><dl><dt>Account</dt><dd>{account?.id} · {session?.environment}</dd><dt>Size</dt><dd>{size} {selected?.unit.toLowerCase()}</dd><dt>Dealing currency</dt><dd>{currency}</dd><dt>Order</dt><dd>Market · fill or kill</dd><dt>Stop / limit distance</dt><dd>{stop || 'None'} / {takeProfit || 'None'}</dd></dl><p>Execution can differ from the displayed quote. This opens a separate position.</p><div class="actions"><button class="ui-tab" onclick={() => review = false}>Cancel</button><button data-testid="ig-confirm" disabled={sending || !!invalid || !!pending} onclick={submit}>Confirm {session?.environment} {direction.toLowerCase()}</button></div>{/if}
+  {:else if reconcile && pending}<h2>Reconcile IG request</h2><p>Open IG separately and inspect positions and activity history for <strong>{pending.accountId} · {pending.environment}</strong>. Confirm that this request has finished processing and your account reflects its outcome. If it is still uncertain, keep the request pending.</p><p>Request {pending.id}. Clearing this notice does not confirm execution or resend the request.</p><label class="reconcile-check"><input type="checkbox" bind:checked={reconciled} /> I checked this account in IG and reconciled the request.</label><div class="actions"><button class="ui-tab" onclick={() => reconcile = false}>Keep pending</button><button disabled={!reconciled || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={clearUncertain}>Mark reconciled</button></div>{:else if editing}{@const ep = record(editing.row.position)}{@const em = record(editing.row.market)}<h2>Edit stop and limit</h2><p>{em.instrumentName} · {ep.direction === 'BUY' ? '+' : '−'}{quote(numeric(ep.size))} at {quote(numeric(ep.level))} · Sell {quote(numeric(em.bid))} / Buy {quote(numeric(em.offer))}</p><label>Stop level <span>empty removes it</span><input class="ui-field" data-testid="ig-edit-stop" inputmode="decimal" bind:value={editing.stop} /></label><label>Limit level <span>empty removes it</span><input class="ui-field" data-testid="ig-edit-limit" inputmode="decimal" bind:value={editing.limit} /></label>{#if editError}<p class="explain" role="alert">{editError}</p>{/if}<div class="actions"><button class="ui-tab" onclick={() => editing = null}>Cancel</button><button data-testid="ig-edit-confirm" disabled={sending || !!pending || !!editError} onclick={editPosition}>Save levels</button></div>{:else if closing}<h2>Close position</h2><p>Close {number(numeric(record(closing.position).size), 4)} of {record(closing.market).instrumentName} at the available market price on your {session?.environment} account?</p><div class="actions"><button class="ui-tab" onclick={() => closing = null}>Cancel</button><button disabled={sending || !!pending} onclick={closePosition}>Confirm close</button></div>{:else}<h2>Review {direction.toLowerCase()}</h2><p>{selected?.market.name}</p><dl><dt>Account</dt><dd>{account?.id} · {session?.environment}</dd><dt>Size</dt><dd>{size} {selected?.unit.toLowerCase()}</dd><dt>Dealing currency</dt><dd>{currency}</dd><dt>Order</dt><dd>{kind ? `${kind === 'LIMIT' ? 'Limit' : 'Stop'} at ${level} · good till cancelled` : 'Market · fill or kill'}</dd><dt>Stop / limit distance</dt><dd>{stop || 'None'} / {takeProfit || 'None'}</dd></dl><p>{kind ? 'The order waits at IG until the market reaches its level or you cancel it.' : 'Execution can differ from the displayed quote.'} This opens a separate position.</p><div class="actions"><button class="ui-tab" onclick={() => review = false}>Cancel</button><button data-testid="ig-confirm" disabled={sending || !!invalid || !!pending} onclick={submit}>Confirm {session?.environment} {direction.toLowerCase()}</button></div>{/if}
 </div></div>{/if}
 
 <style>
@@ -520,9 +546,9 @@
   .tile-head { flex: none; display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 5px 10px; background: none; border-radius: 0; color: var(--dim); font-size: 11px; text-align: left; white-space: nowrap; overflow: hidden; }
   .tile-head b { color: var(--text); font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; } .tile-head[aria-pressed='true'] { background: var(--selected-bg); color: var(--selected-text); } .tile-head[aria-pressed='true'] b { color: var(--selected-text); }
   .chart-wrap { position: relative; flex: 1; min-height: 0; } .chart-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); background: var(--panel); padding: 20px; text-align: center; pointer-events: none; } .chart-note button { pointer-events: auto; } .chart-note p { margin: 0 0 10px; }
-  .positions { flex: 0 0 clamp(140px, 24vh, 220px); min-height: 0; padding: 10px 12px; overflow: auto; border-top: 1px solid var(--line); } .positions .section-title { margin-bottom: 6px; }
+  .positions { flex: 0 0 clamp(140px, 24vh, 220px); min-height: 0; padding: 10px 12px; overflow: auto; border-top: 1px solid var(--line); } .positions .section-title { margin-bottom: 6px; } .positions .section-title { flex-wrap: wrap; } .level { padding: 0 4px; min-height: 20px; } .phone-edit { display: none; }
   .positions .market-name { font-size: 12px; }
-  .ticket { display: flex; flex-direction: column; gap: 10px; } .ticket > label, .dialog label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; color: var(--dim); font-size: 11px; } label > input:not([type=checkbox]), label > select { width: 100%; color: var(--text); }
+  .ticket { display: flex; flex-direction: column; gap: 10px; } .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; } .ticket label, .dialog label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; color: var(--dim); font-size: 11px; } label > input:not([type=checkbox]), label > select { width: 100%; color: var(--text); }
   .ticket-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; } .ticket-head span { min-width: 0; color: var(--bright); font-size: 12px; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
   .side { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; } .side button { padding: 9px 5px; white-space: normal; } dl { display: grid; grid-template-columns: 1fr auto; gap: 7px; margin: 5px 0; font-size: 11px; } dt { color: var(--dim); } dd { margin: 0; text-align: right; } .review { min-height: 38px; flex: none; background: var(--accent); color: var(--bg); font-weight: 600; }
   .message { flex: none; padding: 8px 12px; color: var(--warn-text); background: var(--surface); } .delivery { padding: 8px 0; overflow-wrap: anywhere; } .delivery strong { text-transform: capitalize; } .delivery p { font-size: 12px; }
@@ -557,7 +583,7 @@
     header { padding: 7px 10px; gap: 7px; } .brand { font-size: 15px; } .funds { gap: 4px 10px; font-size: 11px; } .position-table :is(th, td):nth-child(2), .position-table :is(th, td):nth-child(4), .position-table :is(th, td):nth-child(5), .position-table :is(th, td):nth-child(7), .position-table :is(th, td):nth-child(8) { display: none; } .header-actions { gap: 4px; } header select { max-width: 100%; }
     .phone-tabs { flex: none; display: flex; gap: 4px; padding: 5px 8px; background: var(--panel); border-bottom: 1px solid var(--line); } .phone-tabs button { font-size: max(11px, calc(var(--fs) * 0.833)); flex: 1; padding: 6px 4px; }
     .phone-instrument { flex: none; display: flex; gap: 4px; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); } .phone-instrument select { flex: 1; min-width: 0; }
-    main { display: flex; flex-direction: column; } .interval-select { display: block; } .markets, .positions, .ticket, .instruments, .find, .layout, .intervals { display: none; } .workspace { flex: 1; } .charts { min-height: 0; } .chart-heading { padding: 8px 10px; } .chart-actions { margin-left: 0; } .stats { gap: 2px 12px; }
+    main { display: flex; flex-direction: column; } .interval-select { display: block; } .phone-edit { display: inline-block; min-width: 28px; padding: 0 4px; } .orders :is(th, td):nth-child(5), .orders :is(th, td):nth-child(6), .history :is(th, td):nth-child(3), .history :is(th, td):nth-child(4), .history :is(th, td):nth-child(5) { display: none; } .markets, .positions, .ticket, .instruments, .find, .layout, .intervals { display: none; } .workspace { flex: 1; } .charts { min-height: 0; } .chart-heading { padding: 8px 10px; } .chart-actions { margin-left: 0; } .stats { gap: 2px 12px; }
     main[data-view=markets] .markets { display: flex; flex: 1; overflow: auto; } .markets > :not(.market-table) { flex-shrink: 0; } .market-table { flex: 1 0 180px; min-height: 180px; margin: 0 -12px; } main[data-view=markets] .workspace, main[data-view=trade] .workspace { display: none; }
     main[data-view=trade] .ticket { display: flex; flex: 1; } main[data-view=positions] .chart-heading, main[data-view=positions] .charts { display: none; } main[data-view=positions] .positions { display: block; flex: 1; }
     footer { padding: 6px 10px; } footer > span:last-child { display: none; }

@@ -1,17 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createChart, CandlestickSeries, LineSeries, LineStyle, type IChartApi, type IPriceLine, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
+  import { createChart, CrosshairMode, CandlestickSeries, LineSeries, LineStyle, type IChartApi, type IPriceLine, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
   import { sma, type Bar } from './markets';
 
-  export type Line = { price: number; title: string; tone: 'buy' | 'sell' | 'dim' | 'accent' };
+  /** key marks a line the user may drag; releasing it calls onmove and sends nothing. */
+  export type Line = { price: number; title: string; tone: 'buy' | 'sell' | 'dim' | 'accent'; key?: string };
   const MA_TONES = ['--accent', '--warn', '--sell'];
-  let { bars, live = null, theme, epic = '', scope = '', averages = [], lines = [] }: { bars: Bar[]; live?: Bar | null; theme: string; epic?: string; scope?: string; averages?: number[]; lines?: Line[] } = $props();
+  let { bars, live = null, theme, epic = '', scope = '', averages = [], lines = [], onmove }: { bars: Bar[]; live?: Bar | null; theme: string; epic?: string; scope?: string; averages?: number[]; lines?: Line[]; onmove?: (key: string, price: number) => void } = $props();
   let el: HTMLDivElement, chart = $state<IChartApi>(), series = $state<ISeriesApi<'Candlestick'>>();
   let studies: ISeriesApi<'Line'>[] = [], drawn: IPriceLine[] = [], fitted = '';
   const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const shown = $derived(live && bars.length && live.time >= bars[bars.length - 1].time ? [...bars.filter(b => b.time < live.time), live] : bars);
   onMount(() => {
-    chart = createChart(el, { autoSize: true, timeScale: { timeVisible: true }, rightPriceScale: { borderVisible: false } });
+    chart = createChart(el, { autoSize: true, crosshair: { mode: CrosshairMode.Normal }, timeScale: { timeVisible: true }, rightPriceScale: { borderVisible: false } });
     series = chart.addSeries(CandlestickSeries, { borderVisible: false });
     return () => chart?.remove();
   });
@@ -34,17 +35,47 @@
     });
     const key = `${epic}:${scope}:${data.length > 0}`;
     if (key !== fitted) { fitted = key; chart.timeScale().fitContent(); }
+    located();
   });
   $effect(() => {
     if (!series) return;
     void theme;
     for (const line of drawn) series.removePriceLine(line);
+    if (dragging >= 0) return;
     drawn = lines.map(l => series!.createPriceLine({ price: l.price, title: l.title, color: token(`--${l.tone}`), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true }));
+    located();
   });
+  let dragging = -1, near = $state(false);
+  /** Where each draggable line sits, for browser tests. */
+  const located = () => setTimeout(() => { if (el) el.dataset.drag = lines.flatMap(l => l.key ? [`${l.key}@${Math.round(series?.priceToCoordinate(l.price) ?? -1)}`] : []).join('|'); }, 50);
+  const y = (e: PointerEvent) => e.clientY - el.getBoundingClientRect().top;
+  /** The draggable line within 6px of the pointer, or -1. */
+  function hit(e: PointerEvent) {
+    if (!series || !onmove || e.clientX - el.getBoundingClientRect().left > el.clientWidth - 70) return -1;
+    return lines.findIndex(l => l.key && Math.abs((series!.priceToCoordinate(l.price) ?? -99) - y(e)) <= 6);
+  }
+  function down(e: PointerEvent) {
+    dragging = e.button === 0 ? hit(e) : -1;
+    if (dragging < 0) return;
+    e.stopPropagation(); el.setPointerCapture(e.pointerId);
+    chart?.applyOptions({ handleScroll: false, handleScale: false });
+  }
+  function move(e: PointerEvent) {
+    near = dragging >= 0 || hit(e) >= 0;
+    const price = dragging >= 0 ? series?.coordinateToPrice(y(e)) : null;
+    if (price != null && price > 0) drawn[dragging]?.applyOptions({ price });
+  }
+  function up(e: PointerEvent) {
+    if (dragging < 0) return;
+    const line = lines[dragging], price = series?.coordinateToPrice(y(e)), moved = Math.abs((series?.priceToCoordinate(line.price) ?? 0) - y(e)) > 3;
+    drawn[dragging]?.applyOptions({ price: line.price });
+    dragging = -1; chart?.applyOptions({ handleScroll: true, handleScale: true });
+    if (moved && price != null && price > 0) onmove?.(line.key!, price);
+  }
 </script>
 
-<div bind:this={el} class="chart" data-testid="ig-chart" data-epic={epic || undefined} data-bars={bars.length} data-averages={averages.join(' ') || undefined} data-lines={lines.map(l => l.title).join('|') || undefined}></div>
+<div bind:this={el} class="chart" class:near role="presentation" onpointerdowncapture={down} onpointermove={move} onpointerup={up} onpointercancel={up} data-testid="ig-chart" data-epic={epic || undefined} data-bars={bars.length} data-averages={averages.join(' ') || undefined} data-lines={lines.map(l => l.title).join('|') || undefined}></div>
 
 <style>
-  .chart { height: 100%; width: 100%; }
+  .chart { height: 100%; width: 100%; } .near, .near :global(*) { cursor: ns-resize !important; }
 </style>

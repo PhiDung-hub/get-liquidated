@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { array, barsOf, eligibleAccount, fresh, marketOf, numeric, record, spread, spreadBps, text, type Bar, type Detail, type Market, type Session } from '$lib/ig/markets';
-  import IgChart from '$lib/ig/IgChart.svelte';
+  import { array, barsOf, eligibleAccount, fresh, HISTORY, isResolution, liveBar, marketOf, mergeBars, numeric, positionPnl, record, RESOLUTIONS, spread, spreadBps, text, type Bar, type Detail, type Market, type Resolution, type Session } from '$lib/ig/markets';
+  import IgChart, { type Line } from '$lib/ig/IgChart.svelte';
   import ThemePicker from '$lib/ui/ThemePicker.svelte';
   import { THEMES } from '$lib/settings/themes';
   import { load, save } from '$lib/util/storage';
@@ -14,8 +14,8 @@
   }
   type Pending = { id: string; accountId: string; environment: 'live'; reference?: string; status: string; message: string };
   type Draft = { direction: 'BUY' | 'SELL'; size: string; currency: string; stop: string; takeProfit: string };
-  type View = { market: Market; detail: Detail | null; bars: Bar[]; pricesAt: number; at: number; busy: boolean; tried: boolean; note: string; draft: Draft | null };
-  const MAX_VIEWS = 8, GRID = 4, MAX_WATCH = 50;
+  type View = { market: Market; detail: Detail | null; res: Resolution; bars: Bar[]; live: Bar | null; pricesAt: number; at: number; busy: boolean; tried: boolean; note: string; draft: Draft | null };
+  const MAX_VIEWS = 8, GRID = 4, MAX_WATCH = 50, MAX_CACHED = 12, AVERAGES = [7, 30, 99], POLL = 12_000;
   let connection = 0, browseRequest = 0, hydrated = $state(false);
   let session = $state<Session | null>(null);
   let loading = $state(false), connected = $state(false), error = $state(''), notice = $state('');
@@ -39,6 +39,7 @@
   let views = $state<View[]>([]), active = $state(''), layout = $state<'single' | 'grid'>('single'), innerWidth = $state(1440);
   let watchlist = $state<Market[]>([]), quotes = $state<Record<string, Market>>({});
   const inflight = new Map<string, Promise<void>>();
+  let averages = $state(true), allowance = $state<{ remaining: number | null; total: number | null } | null>(null);
   const view = $derived(views.find(v => v.market.epic === active));
   const selected = $derived(view?.detail ?? null);
   const busyMarket = $derived(!!view?.busy);
@@ -83,7 +84,7 @@
   const lite = (m: Market) => ({ epic: m.epic, name: m.name, type: m.type, expiry: m.expiry });
   function persist() {
     const previous = record(load<unknown>('ig:workspace', {}));
-    save('ig:workspace', { open: connected ? views.map(v => lite(v.market)) : array(previous.open), active: connected ? active : text(previous.active), layout, ranking, source });
+    save('ig:workspace', { averages, open: connected ? views.map(v => ({ ...lite(v.market), res: v.res })) : array(previous.open), active: connected ? active : text(previous.active), layout, ranking, source });
   }
   function noteQuotes(list: Market[]) {
     for (const m of list) if ((m.updated ?? 0) >= (quotes[m.epic]?.updated ?? 0)) quotes[m.epic] = m;
@@ -106,7 +107,31 @@
     const v = view;
     if (v && !v.busy && (!v.detail || (!fresh(v.detail.market, now) && Date.now() - v.at > 10_000))) void loadView(epic);
   }
-  const newView = (market: Market): View => ({ market, detail: null, bars: [], pricesAt: 0, at: 0, busy: false, tried: false, note: '', draft: null });
+  const newView = (market: Market, res: Resolution = '1H'): View => ({ market, detail: null, res, bars: [], live: null, pricesAt: 0, at: 0, busy: false, tried: false, note: '', draft: null });
+  type Cached = Record<string, { at: number; bars: Bar[] }>;
+  const cachedBars = (epic: string, res: Resolution) => array(record(record(load<unknown>('ig:bars', {}))[`${epic}|${res}`]).bars).map(record).filter((b): b is Bar => [b.time, b.open, b.high, b.low, b.close].every(n => numeric(n) !== null)).slice(-HISTORY);
+  function keepBars(epic: string, res: Resolution, bars: Bar[]) {
+    const all = { ...record(load<unknown>('ig:bars', {})) as Cached, [`${epic}|${res}`]: { at: Date.now(), bars } };
+    save('ig:bars', Object.fromEntries(Object.entries(all).sort((a, b) => numeric(b[1]?.at)! - numeric(a[1]?.at)!).slice(0, MAX_CACHED)));
+  }
+  function tick(v: View) {
+    const m = v.detail?.market;
+    v.live = m && fresh(m) ? liveBar(v.bars, v.live, (m.bid! + m.offer!) / 2, RESOLUTIONS[v.res][1]) : v.live && v.live.time >= (v.bars.at(-1)?.time ?? 0) ? v.live : null;
+  }
+  function setResolution(res: Resolution) {
+    const v = view;
+    if (!v || v.res === res) return;
+    v.res = res; v.bars = []; v.live = null; v.pricesAt = 0; v.note = '';
+    persist(); void loadView(v.market.epic);
+  }
+  const money = (value: number | null, currency: unknown) => value === null ? '—' : `${value < 0 ? '−' : '+'}${text(currency)} ${fmtNum(Math.abs(value), 2)}`;
+  function linesOf(epic: string): Line[] {
+    return positions.filter(row => record(row.market).epic === epic).flatMap(row => {
+      const p = record(row.position), pnl = positionPnl(row), level = numeric(p.level), stop = numeric(p.stopLevel), limit = numeric(p.limitLevel);
+      const entry: Line[] = level === null ? [] : [{ price: level, title: `${p.direction === 'BUY' ? '+' : '−'}${quote(numeric(p.size))} · ${money(pnl?.value ?? null, p.currency)}`, tone: (pnl?.points ?? 0) < 0 ? 'sell' : 'buy' }];
+      return [...entry, ...(stop === null ? [] : [{ price: stop, title: 'Stop', tone: 'sell' as const }]), ...(limit === null ? [] : [{ price: limit, title: 'Limit', tone: 'buy' as const }])];
+    });
+  }
   function openMarket(m: Market) {
     phoneTab = 'chart';
     if (!views.some(v => v.market.epic === m.epic)) {
@@ -129,14 +154,15 @@
   function loadShown() { for (const v of shown) if (!v.detail && !v.busy && !v.tried) void loadView(v.market.epic); }
   function restoreWorkspace() {
     const saved = record(load<unknown>('ig:workspace', {})), open = liteList(saved.open, MAX_VIEWS);
-    views = open.map(newView); active = '';
+    const kept = (epic: string) => array(saved.open).map(record).find(o => o.epic === epic)?.res;
+    views = open.map(m => newView(m, isResolution(kept(m.epic)) ? kept(m.epic) : '1H')); active = '';
     const target = open.find(m => m.epic === saved.active)?.epic ?? open[0]?.epic;
     if (target) activate(target);
     loadShown();
   }
   const current = (epic: string, epoch: number) => epoch === connection ? views.find(v => v.market.epic === epic) : undefined;
   function loadView(epic: string) {
-    const key = `${connection}:${epic}`;
+    const key = `${connection}:${epic}:${views.find(v => v.market.epic === epic)?.res}`;
     const running = inflight.get(key);
     if (running) return running;
     const task = fetchView(epic, connection).finally(() => inflight.delete(key));
@@ -147,7 +173,8 @@
     const start = current(epic, epoch);
     if (!start) return;
     start.busy = true; start.tried = true;
-    if (!start.bars.length) start.note = 'Loading hourly prices…';
+    const res = start.res, step = RESOLUTIONS[res][1];
+    if (!start.bars.length) start.note = 'Loading prices…';
     try {
       const detail = await api<Detail>(`market?epic=${encodeURIComponent(epic)}`);
       const v = current(epic, epoch);
@@ -156,16 +183,23 @@
       const initial = defaults(detail), fill = (d: Draft): Draft => ({ ...d, size: d.size.trim() ? d.size : initial.size, currency: detail.currencies.includes(d.currency) ? d.currency : initial.currency });
       if (epic !== active) v.draft = fill(v.draft ?? initial);
       else setDraft(fill({ direction, size, currency, stop, takeProfit }));
-      if (v.bars.length && Date.now() - v.pricesAt < 30 * 60_000) return;
-      const history = await api<{ prices: unknown[] }>(`prices?epic=${encodeURIComponent(epic)}`);
+      tick(v);
+      if (v.res !== res || (v.bars.length && Date.now() - v.pricesAt < Math.max(step, 900) * 1000)) return;
+      const known = v.bars.length ? $state.snapshot(v.bars) : cachedBars(epic, res), last = known.at(-1)?.time;
+      const max = last ? Math.min(HISTORY, Math.max(2, Math.ceil((Date.now() / 1000 - last) / step) + 1)) : HISTORY;
+      const history = await api<{ prices: unknown[]; allowance?: typeof allowance }>(`prices?epic=${encodeURIComponent(epic)}&resolution=${res}&max=${max}`);
       const w = current(epic, epoch);
-      if (!w) return;
-      w.bars = barsOf(array(history.prices)); w.pricesAt = Date.now();
-      w.note = w.bars.length ? '' : 'IG returned no hourly prices.';
+      if (!w || w.res !== res) return;
+      const next = barsOf(array(history.prices));
+      if (history.allowance) allowance = { remaining: numeric(history.allowance.remaining), total: numeric(history.allowance.total) };
+      w.bars = last && next.length && next[0].time <= last ? mergeBars(known, next) : next.length ? next : known; w.pricesAt = Date.now();
+      if (next.length) keepBars(epic, res, $state.snapshot(w.bars));
+      tick(w);
+      w.note = w.bars.length ? '' : 'IG returned no prices for this interval.';
     } catch (e) {
       const v = current(epic, epoch);
       if (!v) return;
-      if (!v.bars.length) v.note = 'Hourly chart unavailable.';
+      if (!v.bars.length) v.note = 'Chart unavailable.';
       if (epic === active) error = e instanceof Error ? e.message : 'Market unavailable';
     } finally { const v = current(epic, epoch); if (v) v.busy = false; }
   }
@@ -208,6 +242,13 @@
     const nextPositions = array(record(await api('positions')).positions).map(record);
     if (epoch !== connection) return;
     session = next; positions = nextPositions; connected = true;
+    noteQuotes(nextPositions.flatMap(row => marketOf(row.market) ?? []));
+  }
+  let beat = 0;
+  function poll() {
+    if (document.hidden || !connected || loading || sending || login || review || closing) return;
+    if (view && !view.busy) void loadView(active);
+    if (++beat % 3 === 0) refreshAccount().catch(() => {});
   }
   async function signIn() {
     const epoch = ++connection; browseRequest++; views = []; active = ''; positions = [];
@@ -316,10 +357,11 @@
     watchlist = liteList(load<unknown>('ig:watchlist', []), MAX_WATCH);
     const saved = record(load<unknown>('ig:workspace', {}));
     if (saved.layout === 'grid') layout = 'grid';
+    averages = saved.averages !== false;
     if (['bps', 'points', 'name'].includes(saved.ranking)) ranking = saved.ranking;
     if (saved.source === 'watch') source = 'watch';
     applyTheme(load('ig:theme', theme));
-    const timer = setInterval(() => now = Date.now(), 1000);
+    const timer = setInterval(() => now = Date.now(), 1000), polling = setInterval(poll, POLL);
     void run(async () => {
       keyConfigured = (await api<{ configured: boolean }>('key')).configured;
       try { await refreshAccount(); } catch (e) { if (e instanceof ApiError && e.status === 401) { login = false; return; } throw e; }
@@ -328,20 +370,20 @@
       await browse();
       source = keep;
     });
-    return () => { clearInterval(timer); clearTimeout(searchTimer); };
+    return () => { clearInterval(timer); clearInterval(polling); clearTimeout(searchTimer); };
   });
 </script>
 
 <svelte:window onkeydown={tradeHotkey} bind:innerWidth />
 <svelte:head><title>IG CFD · Get Liquidated</title><meta name="description" content="IG CFD trading, SGD account balances and comparable market spreads." /></svelte:head>
 {#snippet chartNote(v: View | undefined)}
-  {@const note = v ? v.note : !connected ? 'Connect IG to search markets and load a chart.' : 'Select a market to load its hourly chart.'}
+  {@const note = v ? v.note : !connected ? 'Connect IG to search markets and load a chart.' : 'Select a market to load its chart.'}
   {#if note}<div class="chart-note"><div><p>{note}</p>{#if !v}{#if connected}<button class="ui-tab" onclick={findMarket}>Browse markets</button>{:else}<button class="ui-tab" onclick={openLogin}>Connect IG account</button>{/if}{/if}</div></div>{/if}
 {/snippet}
 <div class="ig-app">
   <header>
     <a class="brand" href="/ig">IG <span>CFD</span></a>
-    {#if session}<span class="environment">Live account</span><select aria-label="SGD CFD account" value={session.accountId} disabled={loading || sending || !!pending} onchange={e => switchAccount(e.currentTarget.value)}>{#each session.accounts as a}<option value={a.id} disabled={!eligibleAccount(a)}>{a.name} · {a.currency} · {a.id}</option>{/each}</select><span class="balance">Available <b>{number(account?.available)} {account?.currency || '—'}</b></span>{/if}
+    {#if session}<span class="environment">Live account</span><select aria-label="SGD CFD account" value={session.accountId} disabled={loading || sending || !!pending} onchange={e => switchAccount(e.currentTarget.value)}>{#each session.accounts as a}<option value={a.id} disabled={!eligibleAccount(a)}>{a.name} · {a.currency} · {a.id}</option>{/each}</select><dl class="funds" data-testid="ig-funds"><div><dt>Funds</dt><dd class="num">{number(account?.balance)}</dd></div><div><dt>Profit/Loss</dt><dd class="num" class:buy={(account?.pnl ?? 0) > 0} class:sell={(account?.pnl ?? 0) < 0}>{number(account?.pnl)}</dd></div><div><dt>Margin</dt><dd class="num">{number(account?.margin)}</dd></div><div><dt>Available</dt><dd class="num">{number(account?.available)} {account?.currency || '—'}</dd></div></dl>{/if}
     <div class="header-actions"><ThemePicker value={theme} onchange={applyTheme} /><button class="ui-tab" data-testid="ig-key-settings" disabled={loading || sending} onclick={openKey}>API key{keyConfigured ? ' · Saved' : ''}</button><button class="ui-tab" disabled={loading || sending} onclick={() => connected ? signOut() : openLogin()}>{connected ? 'Sign out' : 'Connect IG'}</button></div>
   </header>
   {#if error && !login}<div class="message" role="alert">{error}</div>{/if}
@@ -379,10 +421,10 @@
         <button class="ui-tab add" aria-label="Open another instrument" title="Open another instrument" onclick={findMarket}>＋</button>
       </nav>{/if}
       <div class="chart-heading">
-        <div class="title"><h1>{selected?.market.name || 'IG markets'}</h1><span>{selected?.market.epic || view?.market.epic || 'Choose a market'} · 1H · Midpoint</span></div>
+        <div class="title"><h1>{selected?.market.name || 'IG markets'}</h1><span>{selected?.market.epic || view?.market.epic || 'Choose a market'} · {view?.res ?? '1H'} · Midpoint</span></div>
         {#if selected}<dl class="stats"><div><dt>Sell</dt><dd class="sell num">{quote(selected.market.bid)}</dd></div><div><dt>Buy</dt><dd class="buy num">{quote(selected.market.offer)}</dd></div><div><dt>Spread</dt><dd class="num chart-spread">{number(spreadBps(selected.market))} bps</dd></div><div><dt>Quote</dt><dd class:warn={!fresh(selected.market, now)}>{status(selected.market)}{#if fresh(selected.market, now)}{` · ${quoteAge(selected.market)}`}{/if}</dd></div></dl>{/if}
         <div class="chart-actions">
-          {#if view}<button class="ui-tab" disabled={busyMarket} onclick={() => loadView(active)}>{busyMarket ? 'Refreshing…' : 'Refresh quote'}</button>{/if}
+          {#if view}<div class="intervals" role="group" aria-label="Chart interval">{#each Object.keys(RESOLUTIONS) as res}<button class="ui-tab" aria-pressed={view.res === res} onclick={() => setResolution(res as Resolution)}>{res}</button>{/each}</div><select class="interval-select" aria-label="Chart interval" value={view.res} onchange={e => setResolution(e.currentTarget.value as Resolution)}>{#each Object.keys(RESOLUTIONS) as res}<option value={res}>{res}</option>{/each}</select><button class="ui-tab" aria-pressed={averages} title="Moving averages of the close over {AVERAGES.join(', ')} bars" onclick={() => { averages = !averages; persist(); }}>MA</button><button class="ui-tab" disabled={busyMarket} onclick={() => loadView(active)}>{busyMarket ? 'Refreshing…' : 'Refresh quote'}</button>{/if}
           {#if views.length > 1}<div class="layout" role="group" aria-label="Chart layout"><button class="ui-tab" aria-pressed={layout === 'single'} aria-label="One chart" onclick={() => setLayout('single')}>1</button><button class="ui-tab" aria-pressed={layout === 'grid'} aria-label="Up to four charts" onclick={() => setLayout('grid')}>2×2</button></div>{/if}
           <button class="ui-tab find" onclick={findMarket}>Find a market</button>
         </div>
@@ -390,16 +432,16 @@
       <div class="charts" class:grid={grid && shown.length > 1} data-count={shown.length} id="ig-panel-chart" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-chart">
         {#each shown as v (v.market.epic)}{@const m = shownMarket(v)}<div class="tile" data-testid="ig-tile" data-epic={m.epic}>
           {#if grid && shown.length > 1}<button class="tile-head" aria-pressed={active === m.epic} aria-label="Make {m.name} active" disabled={review || sending} onclick={() => activate(m.epic)}><b>{m.name}</b><span class="sell num">{quote(m.bid)}</span><span class="buy num">{quote(m.offer)}</span><span class="num">{number(spreadBps(m))} bps</span><span class="dim">{status(m)}</span></button>{/if}
-          <div class="chart-wrap" role="presentation" onpointerdown={() => grid && !review && !sending && activate(m.epic)}><IgChart bars={v.bars} {theme} epic={m.epic} />{@render chartNote(v)}</div>
+          <div class="chart-wrap" role="presentation" onpointerdown={() => grid && !review && !sending && activate(m.epic)}><IgChart bars={v.bars} live={v.live} {theme} epic={m.epic} scope={v.res} averages={averages ? AVERAGES : []} lines={linesOf(m.epic)} />{@render chartNote(v)}</div>
         </div>{:else}<div class="tile"><div class="chart-wrap"><IgChart bars={[]} {theme} />{@render chartNote(undefined)}</div></div>{/each}
       </div>
-      <div class="positions" id="ig-panel-positions" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-positions"><div class="section-title"><h2>Positions <span class="count">{positions.length || ''}</span></h2><button class="ui-tab" disabled={!connected || loading} onclick={() => run(refreshAccount)}>Refresh</button></div><div class="position-table"><table><thead><tr><th>Market</th><th>Direction</th><th>Size</th><th>Entry</th><th>Currency</th><th></th></tr></thead><tbody>{#each positions as row}{@const pm = marketOf(row.market)}<tr><td>{#if pm}<button class="market-name" title="Open chart" onclick={() => openMarket(quotes[pm.epic] ?? pm)}>{pm.name}</button>{:else}{record(row.market).instrumentName}{/if}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction}</td><td>{number(numeric(record(row.position).size), 4)}</td><td>{number(numeric(record(row.position).level), 4)}</td><td>{record(row.position).currency}</td><td><button class="ui-tab" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => closing = row}>Close</button></td></tr>{/each}</tbody></table></div>{#if !positions.length}<p class="empty">{connected ? 'No open positions returned by IG.' : 'Your positions appear after connecting.'}</p>{/if}</div>
+      <div class="positions" id="ig-panel-positions" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-positions"><div class="section-title"><h2>Positions <span class="count">{positions.length || ''}</span></h2><button class="ui-tab" disabled={!connected || loading} onclick={() => run(refreshAccount)}>Refresh</button></div><div class="position-table"><table><thead><tr><th>Market</th><th>Direction</th><th>Size</th><th>Entry</th><th>Latest</th><th title="Estimated from the latest quote IG sent with the position, in its dealing currency. IG's own figure is authoritative.">P&amp;L</th><th>Stop</th><th>Limit</th><th></th></tr></thead><tbody>{#each positions as row}{@const pm = marketOf(row.market)}{@const pnl = positionPnl(row)}<tr data-testid="ig-position"><td>{#if pm}<button class="market-name" title="Open chart" onclick={() => openMarket(quotes[pm.epic] ?? pm)}>{pm.name}</button>{:else}{record(row.market).instrumentName}{/if}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction}</td><td class:buy={record(row.position).direction === 'BUY'} class:sell={record(row.position).direction === 'SELL'}>{record(row.position).direction === 'SELL' ? '−' : '+'}{quote(numeric(record(row.position).size))}</td><td>{quote(numeric(record(row.position).level))}</td><td>{quote(pnl?.exit)}</td><td class="num" class:buy={(pnl?.points ?? 0) > 0} class:sell={(pnl?.points ?? 0) < 0}>{pnl?.value == null ? record(row.position).currency : money(pnl.value, record(row.position).currency)}{#if pnl}<small>{pnl.points < 0 ? '−' : '+'}{quote(Math.abs(pnl.points))} pts</small>{/if}</td><td>{quote(numeric(record(row.position).stopLevel))}</td><td>{quote(numeric(record(row.position).limitLevel))}</td><td><button class="ui-tab" disabled={!!pending || sending || !eligibleAccount(account)} onclick={() => closing = row}>Close</button></td></tr>{/each}</tbody></table></div>{#if !positions.length}<p class="empty">{connected ? 'No open positions returned by IG.' : 'Your positions appear after connecting.'}</p>{/if}</div>
     </section>
     <div class="ticket" id="ig-panel-trade" role="tabpanel" tabindex="0" aria-labelledby="ig-tab-trade"><div class="ticket-head"><h2>Trade</h2><span data-testid="ig-ticket-market">{selected?.market.name ?? view?.market.name ?? 'No market selected'}</span></div><div class="side"><button class="ui-tab buy" aria-pressed={direction === 'BUY'} onclick={() => { direction = 'BUY'; review = false; }}>Buy {number(selected?.market.offer, 4)}</button><button class="ui-tab sell" aria-pressed={direction === 'SELL'} onclick={() => { direction = 'SELL'; review = false; }}>Sell {number(selected?.market.bid, 4)}</button></div><p class="explain">Market order · Fill or kill · Opens a separate position</p><label>Size <span>{selected?.unit.toLowerCase() || 'IG units'}</span><input class="ui-field" data-testid="ig-size" inputmode="decimal" bind:value={size} oninput={() => review = false} /></label><label>B / S size <span>{selected?.unit.toLowerCase() || "IG units"}</span><input class="ui-field" data-testid="ig-hotkey-size" aria-label="B / S size" aria-describedby="ig-hotkey-help" inputmode="decimal" value={hotkeySize} disabled={!selected} oninput={e => setHotkeySize(e.currentTarget.value)} placeholder="Set size for this market" /></label><p class="explain" id="ig-hotkey-help">B buys · S sells · Opens review for the active market with its saved size.{selected && hotkeyError ? ` ${hotkeyError}` : ''}</p><label>Dealing currency<select bind:value={currency} onchange={() => review = false}>{#each selected?.currencies ?? ['SGD'] as c}<option value={c}>{c}</option>{/each}</select></label><label>Stop distance <span>optional · points</span><input class="ui-field" inputmode="decimal" bind:value={stop} oninput={() => review = false} /></label><label>Take-profit distance <span>optional · points</span><input class="ui-field" inputmode="decimal" bind:value={takeProfit} oninput={() => review = false} /></label><dl><dt>Account currency</dt><dd>{account?.currency || '—'}</dd><dt>Spread</dt><dd>{selected ? quote(spread(selected.market)) : '—'} points</dd><dt>Relative spread</dt><dd>{selected ? number(spreadBps(selected.market)) : '—'} bps</dd><dt>Quote</dt><dd>{selected ? quoteAge(selected.market) : '—'}</dd></dl><p class="explain">Margin, fees and currency conversion follow IG’s rates. Stops are not guaranteed.</p>{#if invalid}<p class="explain" data-testid="ig-ticket-reason">{invalid}</p>{/if}<button class="review" data-testid="ig-review" disabled={!!invalid || busyMarket || sending || !!pending} onclick={() => review = true}>Review {direction === 'BUY' ? 'buy' : 'sell'}</button>
       {#if pending}<div class="delivery" role="status" data-testid="ig-delivery"><strong>{pending.status.replaceAll('-', ' ')}</strong><small>{pending.environment} · {pending.accountId}</small><p>{pending.message}</p>{#if pending.reference}<small>Reference {pending.reference}</small>{/if}{#if ['accepted', 'rejected', 'not-submitted'].includes(pending.status)}<button class="ui-tab" onclick={() => pending = null}>Done</button>{:else if pending.reference}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={confirm}>Check confirmation</button>{:else if pending.status === 'unconfirmed'}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={() => { reconciled = false; reconcile = true; }}>Reconcile in IG</button>{/if}</div>{/if}
     </div>
   </main>
-  <footer><span>IG CFD · {connected ? `${session?.environment} · ${account?.currency || 'Select account'}` : 'Disconnected'}</span><span>On-demand quotes · No automatic order retries</span></footer>
+  <footer><span>IG CFD · {connected ? `${session?.environment} · ${account?.currency || 'Select account'}` : 'Disconnected'}</span><span>{#if allowance?.remaining != null}<span data-testid="ig-allowance" title="IG's weekly allowance of historical price points for this API key. Each bar loaded uses one.">Price history {fmtNum(allowance.remaining, 0)}{allowance.total ? ` / ${fmtNum(allowance.total, 0)}` : ''} left</span>{' · '}{/if}Quotes refresh every {POLL / 1000}s · No automatic order retries</span></footer>
 </div>
 {#if login || review || closing || reconcile}<div class="scrim"><div class="dialog ui-menu" class:login-dialog={login} onkeydown={dialogKey} {@attach focusLogin} role="dialog" tabindex="-1" aria-modal="true" aria-label={login ? keySetup ? 'IG API key' : 'Connect IG' : closing ? 'Close position' : reconcile ? 'Reconcile IG request' : 'Review IG order'}>
   {#if login && keySetup}
@@ -430,7 +472,7 @@
   header { border-bottom: 1px solid var(--line); } footer { justify-content: space-between; color: var(--dim); font-size: 10px; border-top: 1px solid var(--line); }
   header select { max-width: 260px; font-size: 12px; }
   .brand { color: var(--bright); font-size: 16px; font-weight: 650; text-decoration: none; white-space: nowrap; } .brand span { font-weight: 400; color: var(--dim); }
-  .header-actions { display: flex; gap: 6px; margin-left: auto; } .balance { color: var(--dim); font-size: 12px; } .balance b { color: var(--bright); font-weight: 500; white-space: nowrap; } .environment { color: var(--warn-text); font-size: 12px; }
+  .header-actions { display: flex; gap: 6px; margin-left: auto; } .funds { display: flex; gap: 4px 16px; margin: 0; font-size: 12px; } .funds div { display: grid; gap: 1px; } .funds dt { color: var(--dim); font-size: 10px; } .funds dd { margin: 0; color: var(--bright); white-space: nowrap; } .funds dd.buy { color: var(--buy-text); } .funds dd.sell { color: var(--sell-text); } .environment { color: var(--warn-text); font-size: 12px; }
   .phone-tabs, .phone-instrument { display: none; }
   main { flex: 1; min-height: 0; display: grid; grid-template-columns: 272px minmax(0, 1fr) 284px; gap: 1px; background: var(--line); }
   main > * { min-width: 0; min-height: 0; background: var(--panel); } .markets, .ticket { padding: 10px 12px; }
@@ -470,7 +512,7 @@
   .instruments .add { flex: none; padding: 2px 8px; }
   .chart-heading { flex: none; padding: 8px 12px; flex-wrap: wrap; } .title { min-width: 0; } .chart-heading h1 { font-size: 15px; } .title span { display: block; color: var(--dim); font-size: 10px; }
   .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px; } .stats div { display: grid; gap: 1px; } .stats dt { color: var(--dim); font-size: 10px; } .stats dd { margin: 0; text-align: left; white-space: nowrap; } .stats .warn { color: var(--warn-text); } .chart-spread { color: var(--bright); }
-  .chart-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; } .layout { display: flex; gap: 1px; } .layout .ui-tab { min-width: 28px; }
+  .chart-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; } .layout, .intervals { display: flex; gap: 1px; } .interval-select { display: none; } .layout .ui-tab { min-width: 28px; }
   .charts { position: relative; flex: 1; min-height: 120px; display: flex; flex-direction: column; }
   .charts.grid { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, 1fr); gap: 1px; background: var(--line); }
   .charts.grid[data-count='3'] > :first-child { grid-row: span 2; }
@@ -512,10 +554,10 @@
   @media (min-width: 901px) and (max-width: 1100px) { main { grid-template-columns: 236px minmax(0, 1fr) 260px; } .markets, .ticket { padding: 10px; } .market-table { margin: 0 -10px; } .stats { display: none; } }
   @media (max-width: 900px) {
     .credential-field input { font-size: max(16px, var(--fs)); }
-    header { padding: 7px 10px; gap: 7px; } .brand { font-size: 15px; } .balance { font-size: 11px; } .header-actions { gap: 4px; } header select { max-width: 100%; }
+    header { padding: 7px 10px; gap: 7px; } .brand { font-size: 15px; } .funds { gap: 4px 10px; font-size: 11px; } .position-table :is(th, td):nth-child(2), .position-table :is(th, td):nth-child(4), .position-table :is(th, td):nth-child(5), .position-table :is(th, td):nth-child(7), .position-table :is(th, td):nth-child(8) { display: none; } .header-actions { gap: 4px; } header select { max-width: 100%; }
     .phone-tabs { flex: none; display: flex; gap: 4px; padding: 5px 8px; background: var(--panel); border-bottom: 1px solid var(--line); } .phone-tabs button { font-size: max(11px, calc(var(--fs) * 0.833)); flex: 1; padding: 6px 4px; }
     .phone-instrument { flex: none; display: flex; gap: 4px; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); } .phone-instrument select { flex: 1; min-width: 0; }
-    main { display: flex; flex-direction: column; } .markets, .positions, .ticket, .instruments, .find, .layout { display: none; } .workspace { flex: 1; } .charts { min-height: 0; } .chart-heading { padding: 8px 10px; } .chart-actions { margin-left: 0; } .stats { gap: 2px 12px; }
+    main { display: flex; flex-direction: column; } .interval-select { display: block; } .markets, .positions, .ticket, .instruments, .find, .layout, .intervals { display: none; } .workspace { flex: 1; } .charts { min-height: 0; } .chart-heading { padding: 8px 10px; } .chart-actions { margin-left: 0; } .stats { gap: 2px 12px; }
     main[data-view=markets] .markets { display: flex; flex: 1; overflow: auto; } .markets > :not(.market-table) { flex-shrink: 0; } .market-table { flex: 1 0 180px; min-height: 180px; margin: 0 -12px; } main[data-view=markets] .workspace, main[data-view=trade] .workspace { display: none; }
     main[data-view=trade] .ticket { display: flex; flex: 1; } main[data-view=positions] .chart-heading, main[data-view=positions] .charts { display: none; } main[data-view=positions] .positions { display: block; flex: 1; }
     footer { padding: 6px 10px; } footer > span:last-child { display: none; }

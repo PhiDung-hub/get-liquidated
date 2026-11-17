@@ -14,14 +14,24 @@
   const tips = $derived(advice.filter(a => !a.coin || a.coin === coin));
   const waiting = $derived(thread.at(-1)?.role === 'user');
 
-  const OFFLINE = 'getliq is not running on this computer, or the browser blocked local network access for this site.', OUTDATED = `Your getliq does not allow this page yet. Update it to ${connector.version}: ${SETUP}`;
+  const OFFLINE = 'getliq is not running on this computer. Run the setup command, then try again.', OUTDATED = `Your getliq does not allow this page yet. Update it to ${connector.version}: ${SETUP}`;
   const utf8 = (value: string) => new TextEncoder().encode(value), hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+  const ASK = 'Your browser is asking whether this site may connect to apps on this device. Choose Allow, then try again.', DENIED = 'This browser blocks this site from apps on this device. Allow "Local network access" (or "Apps on device") for this site in its site settings, then reload.';
+  /** The browser's Local Network Access permission under either name: a first loopback request shows a prompt and waits for the user. */
+  async function permission() {
+    const states = await Promise.all(['loopback-network', 'local-network-access'].map(name => navigator.permissions.query({ name } as unknown as PermissionDescriptor).then(p => p.state as string, () => '')));
+    return states.includes('denied') ? 'denied' : states.includes('prompt') ? 'prompt' : '';
+  }
+  const unreachable = async () => new Error({ denied: DENIED, prompt: ASK, '': OFFLINE }[await permission()]);
   let proven = '';
   /** The program on the port must show it already holds this code or token (HMAC of a nonce keyed by its hash) before the secret is sent to it. */
   async function prove(secret: string) {
     if (proven === secret) return;
     const nonce = crypto.randomUUID();
-    const response = await fetch(`${AGENT}/health?nonce=${nonce}`, { signal: AbortSignal.timeout(5000) }).catch(() => { throw new Error(OFFLINE); });
+    const asking = await permission() === 'prompt';
+    if (asking) note = ASK;
+    const response = await fetch(`${AGENT}/health?nonce=${nonce}`, { signal: AbortSignal.timeout(asking ? 60_000 : 5000) }).catch(async () => { throw await unreachable(); });
+    if (note === ASK) note = '';
     if (response.status === 403) throw new Error(OUTDATED);
     const body = await response.json().catch(() => null);
     const key = await crypto.subtle.importKey('raw', utf8(hex(await crypto.subtle.digest('SHA-256', utf8(secret)))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -34,7 +44,7 @@
   async function call<T>(path: string, body: unknown = undefined, bearer = token): Promise<T> {
     const headers: Record<string, string> = { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}), ...(address ? { 'x-agent-address': address } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) };
     const response = await fetch(`${AGENT}/api/agent/${path}`, { method: body !== undefined ? 'POST' : 'GET', headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(10_000) })
-      .catch(() => { proven = ''; throw new Error(OFFLINE); });
+      .catch(async () => { proven = ''; throw await unreachable(); });
     const result = await response.json().catch(() => ({}));
     if (response.status === 401) { forget(); throw new Error('This browser is no longer paired. Pair again.'); }
     if (response.status === 403) throw new Error(OUTDATED);

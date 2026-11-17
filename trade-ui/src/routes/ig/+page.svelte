@@ -279,9 +279,36 @@
     noteQuotes(nextPositions.flatMap(row => marketOf(row.market) ?? []));
   }
   let beat = 0;
+  let streaming = $state(false);
+  const feedEpics = $derived(connected ? [...new Set([...views.map(v => v.market.epic), ...positions.map(row => text(record(row.market).epic))])].filter(Boolean).sort().slice(0, 20).join(',') : '');
+  function applyTick(data: string) {
+    let q: Record<string, any> = {};
+    try { q = record(JSON.parse(data)); } catch { return; }
+    const bid = numeric(q.bid), offer = numeric(q.offer);
+    if (bid === null || offer === null) return;
+    for (const v of views) {
+      if (v.market.epic !== q.epic || !v.detail) continue;
+      v.detail.market = v.market = { ...v.detail.market, bid, offer, updated: Date.now() };
+      v.at = Date.now(); noteQuotes([v.market]); tick(v);
+    }
+    for (const row of positions) if (row.market?.epic === q.epic) { row.market.bid = bid; row.market.offer = offer; }
+  }
+  $effect(() => {
+    const epics = feedEpics;
+    if (!epics || typeof EventSource === 'undefined') return;
+    const source = new EventSource(`/api/ig/stream?epics=${encodeURIComponent(epics)}`);
+    let lost: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => { clearTimeout(lost); source.close(); streaming = false; };
+    source.addEventListener('ready', () => { clearTimeout(lost); streaming = true; });
+    source.addEventListener('fail', stop);
+    // A dropped stream reconnects by itself; polling resumes only if it stays down or the server refused it.
+    source.onerror = () => { clearTimeout(lost); if (source.readyState === EventSource.CLOSED) streaming = false; else lost = setTimeout(() => streaming = false, 10_000); };
+    source.onmessage = e => applyTick(e.data);
+    return stop;
+  });
   function poll() {
     if (document.hidden || !connected || loading || sending || login || review || closing || editing) return;
-    if (view && !view.busy) void loadView(active);
+    if (view && !view.busy && (!streaming || beat % 5 === 0)) void loadView(active);
     if (++beat % 3 === 0) refreshAccount().catch(() => {});
   }
   async function signIn() {
@@ -485,7 +512,7 @@
       {#if pending}<div class="delivery" role="status" data-testid="ig-delivery"><strong>{pending.status.replaceAll('-', ' ')}</strong><small>{pending.environment} · {pending.accountId}</small><p>{pending.message}</p>{#if pending.reference}<small>Reference {pending.reference}</small>{/if}{#if ['accepted', 'rejected', 'not-submitted'].includes(pending.status)}<button class="ui-tab" onclick={() => pending = null}>Done</button>{:else if pending.reference}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={confirm}>Check confirmation</button>{:else if pending.status === 'unconfirmed'}<button class="ui-tab" disabled={sending || pending.accountId !== session?.accountId || pending.environment !== session?.environment} onclick={() => { reconciled = false; reconcile = true; }}>Reconcile in IG</button>{/if}</div>{/if}
     </div>
   </main>
-  <footer><span>IG CFD · {connected ? `${session?.environment} · ${account?.currency || 'Select account'}` : 'Disconnected'}</span><span>{#if allowance?.remaining != null}<span data-testid="ig-allowance" title="IG's weekly allowance of historical price points for this API key. Each bar loaded uses one.">Price history {fmtNum(allowance.remaining, 0)}{allowance.total ? ` / ${fmtNum(allowance.total, 0)}` : ''} left</span>{' · '}{/if}Quotes refresh every {POLL / 1000}s · No automatic order retries</span></footer>
+  <footer><span>IG CFD · {connected ? `${session?.environment} · ${account?.currency || 'Select account'}` : 'Disconnected'}</span><span>{#if allowance?.remaining != null}<span data-testid="ig-allowance" title="IG's weekly allowance of historical price points for this API key. Each bar loaded uses one.">Price history {fmtNum(allowance.remaining, 0)}{allowance.total ? ` / ${fmtNum(allowance.total, 0)}` : ''} left</span>{' · '}{/if}<span data-testid="ig-feed">{streaming ? 'Quotes streaming' : `Quotes refresh every ${POLL / 1000}s`}</span> · No automatic order retries</span></footer>
 </div>
 {#if login || review || closing || editing || reconcile}<div class="scrim"><div class="dialog ui-menu" class:login-dialog={login} onkeydown={dialogKey} {@attach focusLogin} role="dialog" tabindex="-1" aria-modal="true" aria-label={login ? keySetup ? 'IG API key' : 'Connect IG' : closing ? 'Close position' : editing ? 'Edit stop and limit' : reconcile ? 'Reconcile IG request' : 'Review IG order'}>
   {#if login && keySetup}

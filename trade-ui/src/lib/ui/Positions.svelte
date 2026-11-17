@@ -209,7 +209,9 @@
   .leverage { flex: none; color: var(--dim); white-space: nowrap; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .card .actions { flex: 0 1 auto; min-width: 0; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; gap: 0 8px; }
   .card .actions .link { flex: none; min-height: 32px; min-width: 0; padding: 0; white-space: nowrap; }
-  .actions { display: flex; justify-content: flex-end; gap: 12px; }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  table :global(:is(th, td)) { padding-inline: 4px; }
+  table :global(:is(th, td):first-child) { padding-left: 8px; }
   .actions .link { color: var(--accent); font-size: max(8px, calc(var(--fs) * 0.917)); font-weight: 500; }
   .actions .link:hover { text-decoration: underline; }
   .price.entry.buy { color: color-mix(in srgb, var(--buy-text) 65%, var(--dim)); }

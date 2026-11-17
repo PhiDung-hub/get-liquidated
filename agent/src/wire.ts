@@ -96,6 +96,20 @@ export const chartContext = z.object({
   hotkeys: z.array(z.object({ id: z.string().max(40), label: z.string().max(100), keys: z.array(z.string().max(40)).max(8), gate: z.enum(['A', 'R', 'X']) }).strict()).max(100)
 }).strict();
 
+/** An IG market id (IX.D.NASDAQ.CASH.IP); no Hyperliquid coin has two dots. */
+export const isEpic = (coin: string) => /^[A-Za-z0-9_]{1,10}(\.[A-Za-z0-9_]{1,20}){2,5}$/.test(coin);
+const igRow = { name: text(120).min(1), epic: z.string().refine(isEpic), side, size: px };
+/** What the IG page shows, sent by the browser because this computer holds no IG login: midpoint candles of the market on screen, its quote, and the account's positions and working orders. Untrusted browser data. */
+export const igContext = z.object({
+  coin: z.string().refine(isEpic), name: text(120).min(1), interval,
+  bid: px.nullable(), offer: px.nullable(),
+  candles: z.array(z.tuple([ms, px, px, px, px])).max(200),
+  positions: z.array(z.object({ ...igRow, entry: px, stop: px.nullable(), limit: px.nullable(), pnl: num.nullable(), currency: text(8) }).strict()).max(50),
+  orders: z.array(z.object({ ...igRow, type: text(20), level: px }).strict()).max(50),
+  funds: z.object({ currency: text(8), balance: num.nullable(), pnl: num.nullable(), margin: num.nullable(), available: num.nullable() }).strict().optional()
+}).strict();
+export type IgContext = z.infer<typeof igContext>;
+
 export const observationInput = z.object({
   kind: z.enum(['advice', 'reflection', 'practice']),
   coin: z.string().trim().min(1).max(40).optional(),

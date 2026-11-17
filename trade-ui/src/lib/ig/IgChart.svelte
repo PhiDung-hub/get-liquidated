@@ -3,7 +3,7 @@
   import { createChart, CandlestickSeries, LineSeries, LineStyle, type IChartApi, type IPriceLine, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
   import { sma, type Bar } from './markets';
 
-  export type Line = { price: number; title: string; tone: 'buy' | 'sell' | 'dim' };
+  export type Line = { price: number; title: string; tone: 'buy' | 'sell' | 'dim' | 'accent' };
   const MA_TONES = ['--accent', '--warn', '--sell'];
   let { bars, live = null, theme, epic = '', scope = '', averages = [], lines = [] }: { bars: Bar[]; live?: Bar | null; theme: string; epic?: string; scope?: string; averages?: number[]; lines?: Line[] } = $props();
   let el: HTMLDivElement, chart = $state<IChartApi>(), series = $state<ISeriesApi<'Candlestick'>>();

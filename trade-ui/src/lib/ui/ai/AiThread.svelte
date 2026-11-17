@@ -247,7 +247,7 @@
     {:else if row.kind === 'system'}<li><AiMessage at={row.at} system text={row.text} /></li>
     {:else if row.kind === 'ticket'}<li><SuggestionCard s={row.s} {now} /></li>
     {:else if row.kind === 'mark'}
-      <li><small>◇ {row.mark.type}{row.mark.a !== null ? ` ${price(row.mark, row.mark.a)}` : ''}</small><button class="link" data-testid="ai-discuss-mark" onclick={() => (annotationChat.markId = row.mark.id)}>Discuss: {row.mark.label}</button></li>
+      <li class="mark"><button class="link" data-testid="ai-discuss-mark" title="Open this mark's thread on the chart" onclick={() => (annotationChat.markId = row.mark.id)}><small>{row.mark.type}{row.mark.a !== null ? ` ${price(row.mark, row.mark.a)}` : ''}</small> {row.mark.label}</button></li>
     {:else}
       <li><article data-testid="ai-advice">
         <strong>{row.entry.skill}</strong>
@@ -276,13 +276,11 @@
       {/each}
     </ul>
   {/if}
-  <div class="line">
+  <div class="box">
     <textarea data-testid="ai-ask" rows="1" aria-label={session ? 'Prompt' : `Question about ${market.coin}`} bind:this={box} bind:value={composer.draft} placeholder={composer.target ? 'Prompt your running AI…' : `Ask about ${market.coin}…`} maxlength={cap} disabled={!!blocked} title={blocked} onkeydown={keys} onpaste={pasted} oninput={() => (browsing = -1)}></textarea>
-    <button class="send" data-testid="ai-ask-send" {disabled} title={commandBlocked || 'Enter sends · Shift+Enter adds a line · ↑ recalls your last message · /help lists session commands. Your AI can also start: run /mcp__getliq__mentor in Claude Code.'}>{sending ? 'Sending…' : 'Send'}</button>
-  </div>
-  <div class="foot">
+  <div class="bar">
   <input type="file" multiple hidden accept="image/*,text/*,.md,.csv,.json,.log" data-testid="ai-attach-file" bind:this={picker} onchange={picked} />
-  <button type="button" class="link" data-testid="ai-attach" disabled={!companion.attach || !!blocked || composer.files.length >= MAX_FILES} title={companion.attach ? `Attach up to ${MAX_FILES} images or text files (text at most 32 KiB), or paste or drop them here. Images are resized to ${EDGE}px and stripped of metadata; files stay on this computer.` : ATTACH_NEEDS} onclick={() => picker?.click()}>Attach</button>
+  <button type="button" class="icon" data-testid="ai-attach" aria-label="Attach" disabled={!companion.attach || !!blocked || composer.files.length >= MAX_FILES} title={companion.attach ? `Attach up to ${MAX_FILES} images or text files (text at most 32 KiB), or paste or drop them here. Images are resized to ${EDGE}px and stripped of metadata; files stay on this computer.` : ATTACH_NEEDS} onclick={() => picker?.click()}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 7.5 8 12.5a3 3 0 0 1-4.2-4.2l5.4-5.4a2 2 0 0 1 2.8 2.8L6.7 11a1 1 0 0 1-1.4-1.4L10 5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
   {#if sessions.length || composer.target}
     <select data-testid="ai-terminal-session" aria-label="Send to" bind:value={composer.target} disabled={sending} title="A session takes the prompt through getliq and Agent OS with that session’s permissions; check the local terminal for approvals. Prompts and replies are kept on this computer for 24 hours. Never include secrets.">
       <option value="">Chart · {market.coin}</option>
@@ -291,6 +289,10 @@
       {/each}
     </select>
   {/if}
+    <button class="send" data-testid="ai-ask-send" aria-label={sending ? 'Sending' : 'Send'} aria-busy={sending} {disabled} title={commandBlocked || 'Enter sends · Shift+Enter adds a line · ↑ recalls your last message · /help lists session commands. Your AI can also start: run /mcp__getliq__mentor in Claude Code.'}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+  </div>
+  </div>
+  <div class="foot">
   {#if error}<p class="err" role="status" data-testid="ai-ask-error">{error}</p>
   {:else if blocked && agent.status === 'live'}<p class="warn" data-testid="ai-client">{blocked}</p>
   {:else if gone}<p class="warn">That session is gone. Pick where to send this.</p>
@@ -308,6 +310,9 @@
   p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   small { color: var(--dim); font-family: var(--mono); font-size: max(8px, calc(var(--fs) * 0.917)); overflow-wrap: anywhere; }
   .link { color: var(--accent); }
+  .mark .link { color: var(--text); }
+  .mark .link:hover { color: var(--bright); }
+  .mark small { margin-right: 0.5ch; }
   .link { padding: 0; background: none; text-align: left; }
   article { align-self: stretch; border: 1px solid var(--surface); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
   summary { cursor: pointer; color: var(--dim); margin-bottom: 8px; }
@@ -318,10 +323,16 @@
   .files img { flex: none; width: 20px; height: 20px; object-fit: cover; border-radius: var(--radius); }
   .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .foot p { flex: 1 1 12ch; min-width: 0; }
-  .line { display: flex; align-items: flex-end; gap: 8px; }
-  textarea { flex: 1; min-width: 0; box-sizing: border-box; resize: none; min-height: calc(3lh + 12px); max-height: min(8lh, 25vh); overflow-y: auto; }
-  select { flex: 0 1 auto; min-width: 0; max-width: 55%; }
-  .send { height: var(--ctl); padding: 0 14px; background: var(--accent); color: var(--bg); }
+  .box { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+  .box:focus-within { border-color: var(--dim); }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 2px 4px 4px; }
+  .icon, .send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; background: none; color: var(--dim); border-radius: var(--radius); }
+  .icon:hover:not(:disabled), .send:hover:not(:disabled) { color: var(--bright); }
+  .send { margin-left: auto; background: var(--surface); }
+  .send:not(:disabled) { color: var(--text); }
+  :is(.icon, .send):disabled { opacity: 0.45; }
+  textarea { min-width: 0; box-sizing: border-box; resize: none; border: 0; background: none; outline: none; min-height: calc(2lh + 8px); max-height: min(8lh, 25vh); overflow-y: auto; }
+  select { flex: 0 1 auto; min-width: 0; max-width: 70%; border: 0; background: none; color: var(--dim); padding: 0; }
   .dim { color: var(--dim); }
   .warn { color: var(--warn); }
   .err { color: var(--sell); }

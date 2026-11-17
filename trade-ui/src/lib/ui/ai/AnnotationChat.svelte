@@ -7,6 +7,7 @@
   import { isTouch } from '$lib/ui/touch';
   import { drawings } from '$lib/ui/chart/drawings.svelte';
   import AiMessage from './AiMessage.svelte';
+  import { load, save } from '$lib/util/storage';
   import { included, type SelectionContext } from '$lib/ui/chart/selection';
 
   let { time = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' '), dock = (): 'top' | 'bottom' => 'bottom', collect }: { time?: (t: number) => string; dock?: (price: number) => 'top' | 'bottom'; collect?: (sel: Selection) => SelectionContext } = $props();
@@ -41,6 +42,23 @@
     if (await wakeSession(id).catch(() => false)) woke = id;
   }
   let draft = $state('');
+  const SIZE = 'trade-ui:chat-size';
+  let size = $state(load(SIZE, { w: 0, h: 0 }));
+  let grip: { x: number; y: number; w: number; h: number } | null = null;
+  const keep = (next: { w: number; h: number }) => save(SIZE, (size = next));
+  function gripDown(e: PointerEvent) {
+    const box = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect();
+    grip = { x: e.clientX, y: e.clientY, w: box.width, h: box.height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function gripMove(e: PointerEvent) {
+    if (grip) size = { w: Math.max(300, Math.round(grip.w + grip.x - e.clientX)), h: Math.max(280, Math.round(grip.h + (side === 'top' ? e.clientY - grip.y : grip.y - e.clientY))) };
+  }
+  function gripUp() {
+    if (grip) keep(size);
+    grip = null;
+  }
   let sending = $state(false);
   let error = $state('');
   let copied = $state(false);
@@ -185,8 +203,9 @@
 <svelte:document onvisibilitychange={() => document.hidden && cancelVoice()} />
 
 {#if mark && shown}
-  <div class="annotation-chat" class:top={side === 'top'} data-testid="annotation-chat" data-side={side} role="dialog" tabindex="-1" aria-label="Chat about annotation" onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape') close(); }}>
+  <div class="annotation-chat" class:top={side === 'top'} class:sized={!!size.h} style:--aw={size.w ? `${size.w}px` : null} style:--ah={size.h ? `${size.h}px` : null} data-testid="annotation-chat" data-side={side} role="dialog" tabindex="-1" aria-label="Chat about annotation" onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape') close(); }}>
     <header><div><small>{mark.coin} · {mark.author === 'user' ? (mark.type === 'zone' ? 'your zone' : 'your point') : mark.type}</small><strong>{mark.label}</strong></div><button aria-label="Close annotation chat" onclick={() => close()}>×</button></header>
+    <span class="grip" data-testid="annotation-grip" role="presentation" title="Drag to resize, double-click to reset" onpointerdown={gripDown} onpointermove={gripMove} onpointerup={gripUp} onpointercancel={gripUp} ondblclick={() => keep({ w: 0, h: 0 })}></span>
     {#if mark.a !== null}<p class="prices" data-testid="annotation-prices">{fmtPx(mark.a, decimals)}{mark.b !== null ? ` – ${fmtPx(mark.b, decimals)}` : ''}</p>{/if}
     {#if when}<small class="dim" data-testid="annotation-when">{when}</small>{/if}
     {#if includes}<small class="dim" data-testid="annotation-included">Included: {includes}</small>{/if}
@@ -207,25 +226,29 @@
       {#if active && !blocked && !thread?.messages.length}
         <div class="quick" data-testid="annotation-quick">{#each PROMPTS as q (q)}<button type="button" disabled={sending} onclick={() => send(q)}>{q}</button>{/each}</div>
       {/if}
-      <textarea bind:this={input} bind:value={draft} aria-label="Question about this annotation" placeholder="What would confirm this setup?" title="Enter sends, Shift+Enter adds a line" maxlength="1000" rows="2" disabled={!active || sending || listening}
+      <textarea bind:this={input} bind:value={draft} aria-label="Question about this annotation" placeholder="What would confirm this setup?" title="Enter sends, Shift+Enter adds a line. Threads expire after 24 hours idle; don’t send secrets." maxlength="1000" rows="2" disabled={!active || sending || listening}
         onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !isTouch()) { e.preventDefault(); void send(); } }}></textarea>
       <div class="actions">
         {#if sel}<button type="button" data-testid="annotation-cancel" onclick={() => close()}>Cancel</button>
         {:else if mark.id}<button type="button" class="delete" data-testid="annotation-delete" disabled={deleting} onclick={remove}>{deleting ? 'Deleting…' : 'Delete'}</button>{/if}
-        <button type="button" data-testid="annotation-voice" aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} aria-describedby="annotation-voice-help" disabled={!voiceSupported || !active || sending || (!listening && draft.length >= 1000)} onclick={voice}>{listening ? 'Stop' : 'Voice'}</button>
-        <button data-testid="annotation-send" disabled={!active || sending || listening || !!blocked || !draft.trim()}>{sending ? 'Sending…' : 'Send question'}</button>
+        <button type="button" data-testid="annotation-voice" aria-label={listening ? 'Stop voice input' : 'Start voice input'} aria-pressed={listening} aria-describedby={voiceSupported ? undefined : 'annotation-voice-help'} title={voiceSupported ? 'Starts only when you press it. Your browser may send audio to its speech service.' : undefined} disabled={!voiceSupported || !active || sending || (!listening && draft.length >= 1000)} onclick={voice}>{listening ? 'Stop' : 'Voice'}</button>
+        <button data-testid="annotation-send" disabled={!active || sending || listening || !!blocked || !draft.trim()}>{sending ? 'Sending…' : 'Send'}</button>
       </div>
       {#if listening}<small role="status">Listening… Stop to review your text before sending.</small>{/if}
-      <small id="annotation-voice-help" class="dim">{voiceSupported ? 'Voice starts only when you press Voice. Your browser may send audio to its speech service.' : 'Voice input is unavailable in this browser. You can still type your question.'}</small>
+      {#if !voiceSupported}<small id="annotation-voice-help" class="dim">Voice input is unavailable in this browser. You can still type your question.</small>{/if}
     </form>
     {#if error}<p role="alert" class="error">{error}</p>{/if}
-    <small class="dim">Threads expire after 24 hours idle. Don’t send secrets.</small>
   </div>
 {/if}
 
 <style>
-  .annotation-chat { position: absolute; z-index: 8; right: 12px; bottom: 32px; width: min(380px, calc(100% - 24px)); max-height: min(520px, calc(100% - 48px)); overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: 0 8px 32px #0006; color: var(--text); font-size: max(14px, var(--fs)); }
+  .annotation-chat { position: absolute; z-index: 8; right: 12px; bottom: 32px; width: min(var(--aw, 380px), calc(100% - 24px)); height: var(--ah, auto); max-height: min(520px, calc(100% - 48px)); overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: 0 8px 32px #0006; color: var(--text); font-size: max(14px, var(--fs)); }
   .annotation-chat.top { top: 8px; bottom: auto; }
+  .annotation-chat.sized { max-height: calc(100% - 48px); }
+  .sized .messages { flex: 1 1 0; min-height: 3lh; max-height: none; }
+  .grip { position: absolute; z-index: 2; left: 0; top: 0; width: 14px; height: 14px; cursor: nwse-resize; touch-action: none; border-left: 1px solid var(--dim); border-top: 1px solid var(--dim); border-top-left-radius: var(--radius); opacity: 0.5; }
+  .top .grip { top: auto; bottom: 0; cursor: nesw-resize; border-top: 0; border-bottom: 1px solid var(--dim); border-radius: 0 0 0 var(--radius); }
+  .grip:hover { opacity: 1; }
   header { position: sticky; top: 0; z-index: 1; display: flex; gap: 12px; align-items: start; padding-top: 16px; background: var(--panel); }
   header div { flex: 1; display: grid; gap: 4px; }
   header button { font-size: 22px; }
@@ -247,7 +270,8 @@
   .delete { color: var(--sell); margin-right: auto; }
   @media (max-width: 900px) {
     textarea { font-size: 16px; min-height: 44px; }
-    .annotation-chat { left: 4px; right: 4px; bottom: 4px; width: auto; max-height: calc(100% - 8px); gap: 6px; padding: 0 10px 10px; }
+    .grip { display: none; }
+    .annotation-chat, .annotation-chat.sized { left: 4px; right: 4px; bottom: 4px; width: auto; height: auto; max-height: calc(100% - 8px); gap: 6px; padding: 0 10px 10px; }
     .annotation-chat.top { top: 4px; }
     header { padding-top: 6px; align-items: center; }
     .messages { max-height: none; }

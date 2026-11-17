@@ -1339,6 +1339,7 @@
           {@render item('log', 'Logarithmic', scale.mode === MODES.log, () => regularOr('log'), keys('chartLog'))}
           <hr />
           {@render item('fills', 'Buy/sell markers', settings.chart.indicators.fills.on, () => { settings.chart.indicators.fills.on = !settings.chart.indicators.fills.on; persist(); })}
+          {#if !noAi()}{@render item('ai', 'AI annotations', settings.chart.indicators.ai.on, () => { settings.chart.indicators.ai.on = !settings.chart.indicators.ai.on; persist(); })}{/if}
           <hr />
           {@render item('more', 'More settings…', false, () => openSettings('display'))}
         </div>

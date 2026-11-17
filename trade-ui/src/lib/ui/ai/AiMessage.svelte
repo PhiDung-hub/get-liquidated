@@ -46,7 +46,7 @@
 
 <div class="msg" class:ai class:system data-testid="ai-msg" data-role={system ? 'system' : ai ? 'assistant' : 'user'}>
   <time datetime={new Date(at).toISOString()}>{clock(at)}</time>
-  <span class="glyph" aria-hidden="true">{system ? '·' : ai ? '●' : '❯'}</span>
+  <span class="glyph" aria-hidden="true">{system ? '·' : ai ? '•' : '❯'}</span>
   <div class="body">
     {#if ai}
       <div class="text" data-testid={testid}>

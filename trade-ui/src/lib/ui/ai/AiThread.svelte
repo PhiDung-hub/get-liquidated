@@ -1,7 +1,13 @@
 <script module lang="ts">
   type Pending = { key: number; name: string; image: boolean; size: number; thumb?: string; id?: string; error?: string };
   const composer = $state({ draft: '', target: '', files: [] as Pending[], help: [] as number[] });
-  const HELP = '/compact summarises this conversation to free context · /clear starts a new one · /help shows this. Auto-compact is in ⚙.';
+  const COMMANDS = [
+    { name: 'compact', description: 'summarises this conversation to free context' },
+    { name: 'clear', description: 'starts a new one' },
+    { name: 'help', description: 'shows this' }
+  ] as const;
+  type Slash = (typeof COMMANDS)[number];
+  const HELP = `${COMMANDS.map((c) => `/${c.name} ${c.description}`).join(' · ')}. Auto-compact is in ⚙.`;
   let attachSeq = 0;
   export const onDock = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files') && !!(e.target as Element | null)?.closest?.('.copilot');
 </script>
@@ -155,8 +161,19 @@
   const waiting = $derived(!!composer.target && agent.commands.some((c) => `${c.client}:${c.sessionId}` === composer.target && connection.now - c.created < 180_000 && OPEN.includes(c.status)));
   const cap = $derived(composer.target ? 2000 : 1000);
   /** A session command is the whole message, with no files, typed for the chart; a terminal session gets the text as it is. */
-  const command = $derived(composer.target || composer.files.length ? undefined : (/^\/(compact|clear|help)$/.exec(composer.draft.trim())?.[1] as 'compact' | 'clear' | 'help' | undefined));
-  const commandBlocked = $derived(!command || command === 'help' ? '' : !agent.answerer ? 'Session commands need answers on screen (getliq setup --answer in a terminal)' : !companion.session ? SESSION_NEEDS : '');
+  const slashes = $derived(composer.target || composer.files.length ? [] : COMMANDS);
+  const command = $derived(slashes.find((c) => `/${c.name}` === composer.draft.trim())?.name);
+  const needs = (name: Slash['name'] | undefined) => (!name || name === 'help' ? '' : !agent.answerer ? 'Session commands need answers on screen (getliq setup --answer in a terminal)' : !companion.session ? SESSION_NEEDS : '');
+  const commandBlocked = $derived(needs(command));
+  const typed = $derived(composer.draft.trimStart());
+  const matches = $derived(/^\/\S*$/.test(typed) ? slashes.filter((c) => `/${c.name}`.startsWith(typed)) : []);
+  let pick = $state(0);
+  let dismissed = $state<string>();
+  let atEnd = $state(true);
+  const caret = () => (atEnd = box?.selectionStart === box?.value.length);
+  const active = $derived(blocked || dismissed === composer.draft ? undefined : matches[Math.min(pick, matches.length - 1)]);
+  const ghost = $derived(active && atEnd ? `/${active.name}`.slice(typed.length) : '');
+  const accept = (c: Slash) => ([composer.draft, browsing, pick] = [`/${c.name}`, -1, 0]);
   let sending = $state(false);
   let error = $state('');
   const disabled = $derived(!composer.draft.trim() || composer.draft.length > cap || sending || !!blocked || !!commandBlocked || gone || waiting || uploading || failed || (!!composer.target && agent.status !== 'live'));
@@ -184,14 +201,24 @@
         retry = null;
       } else await askNow(message, ids);
       composer.files = composer.files.filter((f) => !f.id || !ids.includes(f.id));
-      if (composer.draft.trim() === message) [composer.draft, browsing] = ['', -1];
+      if (composer.draft.trim() === message) [composer.draft, browsing, dismissed] = ['', -1, undefined];
       stuck = true;
     } catch (e) { error = (e as Error).message; }
     finally { sending = false; }
   }
 
   let browsing = -1;
+  function listKey(e: KeyboardEvent, c: Slash) {
+    if (browsing < 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) pick = (matches.indexOf(c) + (e.key === 'ArrowUp' ? matches.length - 1 : 1)) % matches.length;
+    else if (e.key === 'Escape') (e.stopPropagation(), (dismissed = composer.draft));
+    else if (ghost && !e.shiftKey && (e.key === 'Tab' || (e.key === 'ArrowRight' && box?.selectionStart === composer.draft.length))) accept(c);
+    else if (e.key === 'Enter' && !e.shiftKey) (accept(c), void send());
+    else return false;
+    e.preventDefault();
+    return true;
+  }
   function keys(e: KeyboardEvent) {
+    if (active && !e.isComposing && e.keyCode !== 229 && listKey(e, active)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault();
       return void send();
@@ -220,7 +247,7 @@
 
 {#snippet files(list: Attachment[] | undefined)}{#if list?.length}<small data-testid="ai-sent-attachments">{sentTags(list)}</small>{/if}{/snippet}
 
-<svelte:document ondrop={dropped} />
+<svelte:document ondrop={dropped} onselectionchange={caret} />
 
 {#snippet chatRow(row: ChatRow)}
   <li>
@@ -276,8 +303,19 @@
       {/each}
     </ul>
   {/if}
+  {#if active}
+    <ul class="commands" id="ai-commands" role="listbox" aria-label="Session commands" data-testid="ai-commands">
+      {#each matches as c (c.name)}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <li id="ai-command-{c.name}" role="option" aria-selected={c === active} aria-disabled={!!needs(c.name)} title={needs(c.name) || undefined} data-testid="ai-command" onmousedown={(e) => e.preventDefault()} onclick={() => accept(c)}><b>/{c.name}</b><span>{c.description}</span></li>
+      {/each}
+    </ul>
+  {/if}
   <div class="box">
-    <textarea data-testid="ai-ask" rows="1" aria-label={session ? 'Prompt' : `Question about ${market.coin}`} bind:this={box} bind:value={composer.draft} placeholder={composer.target ? 'Prompt your running AI…' : `Ask about ${market.coin}…`} maxlength={cap} disabled={!!blocked} title={blocked} onkeydown={keys} onpaste={pasted} oninput={() => (browsing = -1)}></textarea>
+    <div class="field">
+    <textarea data-testid="ai-ask" rows="1" role="combobox" aria-autocomplete="list" aria-expanded={!!active} aria-controls="ai-commands" aria-activedescendant={active ? `ai-command-${active.name}` : undefined} aria-label={session ? 'Prompt' : `Question about ${market.coin}`} bind:this={box} bind:value={composer.draft} placeholder={composer.target ? 'Prompt your running AI…' : `Ask about ${market.coin}…`} maxlength={cap} disabled={!!blocked} title={blocked} onkeydown={keys} onpaste={pasted} oninput={() => ([browsing, pick, dismissed] = [-1, 0, undefined], caret())}></textarea>
+    {#if ghost}<div class="ghost" aria-hidden="true"><span>{composer.draft}</span><i data-testid="ai-ghost">{ghost}</i></div>{/if}
+    </div>
   <div class="bar">
   <input type="file" multiple hidden accept="image/*,text/*,.md,.csv,.json,.log" data-testid="ai-attach-file" bind:this={picker} onchange={picked} />
   <button type="button" class="icon" data-testid="ai-attach" aria-label="Attach" disabled={!companion.attach || !!blocked || composer.files.length >= MAX_FILES} title={companion.attach ? `Attach up to ${MAX_FILES} images or text files (text at most 32 KiB), or paste or drop them here. Images are resized to ${EDGE}px and stripped of metadata; files stay on this computer.` : ATTACH_NEEDS} onclick={() => picker?.click()}><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13 7.5 8 12.5a3 3 0 0 1-4.2-4.2l5.4-5.4a2 2 0 0 1 2.8 2.8L6.7 11a1 1 0 0 1-1.4-1.4L10 5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
@@ -331,6 +369,17 @@
   .send { margin-left: auto; background: var(--surface); }
   .send:not(:disabled) { color: var(--text); }
   :is(.icon, .send):disabled { opacity: 0.45; }
+  .commands { margin: 0; padding: 0 7px; list-style: none; }
+  .commands li { flex-direction: row; flex-wrap: wrap; gap: 0 1ch; cursor: pointer; color: var(--dim); }
+  .commands b { flex: 0 0 6.5em; font-family: var(--mono); font-weight: 400; color: var(--text); }
+  .commands span { flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
+  .commands [aria-selected='true'] b { color: var(--accent); font-weight: 700; }
+  .commands [aria-disabled='true'] { opacity: 0.55; }
+  .field { position: relative; display: grid; }
+  .ghost { position: absolute; inset: 0; padding: 4px 6px; overflow: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: break-word; }
+  .ghost span { visibility: hidden; }
+  .ghost i { font-style: normal; color: var(--faint); }
+  @media (max-width: 900px) { .ghost { font-size: max(16px, 1em); } }
   textarea { min-width: 0; box-sizing: border-box; resize: none; border: 0; background: none; outline: none; min-height: calc(2lh + 8px); max-height: min(8lh, 25vh); overflow-y: auto; }
   select { flex: 0 1 auto; min-width: 0; max-width: 70%; border: 0; background: none; color: var(--dim); padding: 0; }
   .dim { color: var(--dim); }

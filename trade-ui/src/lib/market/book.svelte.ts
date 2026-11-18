@@ -13,6 +13,8 @@ class Book {
   bids = $state.raw<Level[]>([]);
   asks = $state.raw<Level[]>([]);
   time = $state(0);
+  bid = $state(0);
+  ask = $state(0);
   bin = $state<Bin | null>(null);
   gen = $state(0);
 }
@@ -20,6 +22,8 @@ export const book = new Book();
 export const bbo = $state({ bid: 0, ask: 0, bidSz: 0, askSz: 0, time: 0, seen: 0 });
 let top = EMPTY;
 let depth = EMPTY;
+let snapshotTime = 0;
+let frame = 0;
 let bboN = [0, 0];
 let waiting = { top: false, depth: false };
 
@@ -28,34 +32,48 @@ const sides = (d: any): Sides => {
   const [bids, asks] = arr<any[]>(d.levels, 'levels');
   return { bids: bids.map(level), asks: asks.map(level) };
 };
-const worse = (isBid: boolean, px: number) => (l: Level) => (isBid ? l.px < px : l.px > px);
+const worse = (isBid: boolean, px: number, best: number) => (isBid ? px < best : px > best);
 
 function merged(isBid: boolean): Level[] {
   const fast = isBid ? top.bids : top.asks;
   const slow = isBid ? depth.bids : depth.asks;
-  const last = fast.at(-1);
-  const rows = [...fast, ...(last ? slow.filter(worse(isBid, last.px)) : slow)];
-  const best = isBid ? bbo.bid : bbo.ask;
-  if (!(best > 0)) return rows.slice(0, MAX_ROWS);
   // Grouped sizes belong to the depth snapshot; a newer BBO cannot remove its buckets.
-  if (book.bin !== null) return rows.slice(0, MAX_ROWS);
-  const live = { px: best, sz: isBid ? bbo.bidSz : bbo.askSz, n: bboN[isBid ? 0 : 1] };
-  return [live, ...rows.filter(worse(isBid, best))].slice(0, MAX_ROWS);
+  const best = book.bin === null ? (isBid ? bbo.bid : bbo.ask) : 0;
+  const rows: Level[] = [];
+  if (best > 0) rows.push({ px: best, sz: isBid ? bbo.bidSz : bbo.askSz, n: bboN[isBid ? 0 : 1] });
+  for (const level of fast) {
+    if (!(best > 0) || worse(isBid, level.px, best)) rows.push(level);
+    if (rows.length === MAX_ROWS) return rows;
+  }
+  const last = fast.at(-1)?.px;
+  for (const level of slow) {
+    if ((last === undefined || worse(isBid, level.px, last)) && (!(best > 0) || worse(isBid, level.px, best))) rows.push(level);
+    if (rows.length === MAX_ROWS) break;
+  }
+  return rows;
 }
 
-function merge() {
-  book.bids = merged(true);
-  book.asks = merged(false);
+// Keep quotes synchronous and publish the latest ladder once before paint.
+function scheduleMerge() {
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    book.bids = merged(true);
+    book.asks = merged(false);
+    book.bid = bbo.bid;
+    book.ask = bbo.ask;
+    book.time = snapshotTime;
+  });
 }
 
 // HL pushes bbo only on change, so a book frame whose best levels still agree with it vouches for a quiet bbo; one that moved past it does not, and a dead bbo feed goes stale.
 function stamp(d: any, s: Sides) {
-  book.time = num(d.time, 'time');
+  snapshotTime = num(d.time, 'time');
   const [b, a] = [s.bids[0]?.px, s.asks[0]?.px];
   // Grouped buckets floor bids and ceil asks, so the bbo can sit inside the best bucket.
   const agrees = book.bin === null ? b === bbo.bid && a === bbo.ask : b <= bbo.bid && a >= bbo.ask;
   if (agrees) bbo.seen = Date.now();
-  merge();
+  scheduleMerge();
 }
 
 export function applyTop(d: any) {
@@ -73,9 +91,13 @@ export function applyDepth(d: any) {
 }
 
 export function clearBook() {
+  if (frame) cancelAnimationFrame(frame);
+  frame = 0;
   top = depth = EMPTY;
-  book.bids = [];
-  book.asks = [];
+  book.bids = EMPTY.bids;
+  book.asks = EMPTY.asks;
+  book.bid = book.ask = 0;
+  book.time = snapshotTime = 0;
 }
 
 // Frames carry no echo of nSigFigs/mantissa, and HL keeps sending the old grouping until it handles the unsubscribe, so after a bin change each feed drops frames until its new subscription is acked; HL sends that sub's first snapshot right after the ack.
@@ -109,7 +131,7 @@ export function applyBbo(d: any) {
   const { n, ...b } = parseBbo(d);
   bboN = n;
   Object.assign(bbo, b, { seen: Date.now() });
-  merge();
+  scheduleMerge();
 }
 
 export const watchBbo = (coin: string, f: (b: { bid: number; ask: number; bidSz: number; askSz: number; time: number }) => void) =>

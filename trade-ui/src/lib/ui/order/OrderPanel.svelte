@@ -394,7 +394,7 @@
 </script>
 
 {#snippet ladderRow(c: Draft)}
-  <tr data-testid="scale-row"><td class={c.isBuy ? 'buy' : 'sell'}>{fmtPx(c.px, szDec, spot)}</td><td>{fmtSz(c.sz, szDecimals)}</td><td class="dim">{fmtIn(c.px * c.sz, quoteIn(coin))}</td></tr>
+  <tr data-testid="scale-row" ondblclick={fewRows ? undefined : () => showLadder(!ladderOpen)}><td class={c.isBuy ? 'buy' : 'sell'}>{fmtPx(c.px, szDec, spot)}</td><td>{fmtSz(c.sz, szDecimals)}</td><td class="dim">{fmtIn(c.px * c.sz, quoteIn(coin))}</td></tr>
 {/snippet}
 {#snippet ladderToggle(testid: string, label: string, text: string, onclick: () => void)}
   <tr><td colspan="3"><button class="more dim" data-testid={testid} aria-label={label} {onclick}>{text}</button></td></tr>

@@ -16,6 +16,7 @@
   import Connection from './Connection.svelte';
   import AccountSwitch from './AccountSwitch.svelte';
   import ZenToggle from './ZenToggle.svelte';
+  import FundingRate from './FundingRate.svelte';
   import { inZen } from './zen';
 
   let suggestMigration = $state(false);
@@ -30,7 +31,6 @@
     suggestMigration = false;
     save('trade-ui:migration-suggested', true);
   }
-  let now = $state(0);
 
   const ctx = $derived(market.ctx ?? meta.ctxs.get(market.coin) ?? null);
   const szDec = $derived(meta.byName.get(market.coin)?.szDecimals ?? 0);
@@ -38,20 +38,9 @@
   const spot = $derived(isSpot(market.coin));
   const quote = $derived(quoteOf(market.coin));
   const change = $derived(ctx ? (ctx.markPx - ctx.prevDayPx) / ctx.prevDayPx : NaN);
-  const toFunding = $derived(3_600_000 - (now % 3_600_000));
-  const fundingSeconds = $derived(Math.ceil(toFunding / 1000));
-  const countdown = $derived(`${String(Math.floor(fundingSeconds / 60)).padStart(2, '0')}:${String(fundingSeconds % 60).padStart(2, '0')}`);
-  const fundingHelp = 'Current estimated hourly funding rate. Next Hyperliquid settlement is at the next UTC hour. Positive rates: longs pay shorts; negative rates: shorts pay longs. The rate may change before settlement.';
   const phone = new MediaQuery('max-width: 900px');
   const diff = $derived(ctx ? ctx.markPx - ctx.prevDayPx : NaN);
   let statsOpen = $state(false);
-  // The funding countdown shows on a phone only with the stats open.
-  $effect(() => {
-    if (phone.current && !statsOpen) return;
-    now = Date.now();
-    const t = setInterval(() => (now = Date.now()), 1000);
-    return () => clearInterval(t);
-  });
   function toAccountTab() {
     settings.display.phoneTab = 'account';
     persist();
@@ -140,7 +129,7 @@
 {/snippet}
 {#snippet fundingStat()}
 {#if !spot}
-<div class="stat" title={fundingHelp}><span class="dim">Funding</span><span class="funding-values"><span class="num" data-testid="funding" class:buy={(ctx?.funding ?? 0) >= 0} class:sell={(ctx?.funding ?? 0) < 0}>{ctx?.funding != null ? `${fmtNum(ctx.funding * 100, 4)}%` : '—'}</span><span class="dim">in</span><time class="num" data-testid="funding-countdown" datetime={now ? `PT${fundingSeconds}S` : null} aria-label={now ? `${countdown} until next funding settlement` : null}>{now ? countdown : "—"}</time></span></div>
+<div class="stat"><span class="dim">Funding</span><FundingRate rate={ctx?.funding ?? null} running={!inZen()} /></div>
 {/if}
 {/snippet}
 
@@ -224,8 +213,6 @@
   .chips:global(.bare) .num { display: none; }
   .coin { font-weight: 600; font-size: calc(var(--fs) * 1.167); background: none; padding: 4px 0; color: var(--bright); }
   .stat { display: flex; flex-direction: column; font-size: max(8px, calc(var(--fs) * 0.917)); }
-  .funding-values { display: flex; align-items: baseline; gap: 5px; }
-  .funding-values time { color: var(--bright); font-variant-numeric: tabular-nums; }
   .chips { display: flex; gap: 2px; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .chip { display: flex; gap: 4px; align-items: baseline; padding: 4px 6px; background: none; color: var(--dim); }
   .chip[aria-current='true'] { background: var(--surface); color: var(--bright); }

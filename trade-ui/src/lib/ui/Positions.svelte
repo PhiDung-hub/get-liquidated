@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { dailyFunding, FUNDING_DAY_MS } from '$lib/account/funding.svelte';
-  import { inventory, liqDist, markOf as mark, type Position } from '$lib/account/inventory.svelte';
+  import { inventory, liqDist, markOf as mark, summary, type Position } from '$lib/account/inventory.svelte';
   import { isTrailing, openOrders } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { listed, maintenance, meta } from '$lib/market/meta.svelte';
@@ -31,8 +31,8 @@
     { key: 'margin', label: 'Margin', value: (p) => p.marginUsed },
     { key: 'funding', label: 'Funding', value: (p) => -p.fundingSinceOpen }
   ], '');
-  const rows = $derived(sorter.sort(inventory.positions.filter((p) => p.szi !== 0 && inFilter(p.coin, p.szi > 0))));
-  const totalFunding = $derived(-rows.reduce((sum, p) => sum + p.fundingSinceOpen, 0));
+  const openPositions = $derived(inventory.positions.filter((p) => p.szi !== 0));
+  const rows = $derived(sorter.sort(openPositions.filter((p) => inFilter(p.coin, p.szi > 0))));
   let dayStart = $state<number | null>(null);
   onMount(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -51,6 +51,27 @@
     const amount = -p.szi * ctx.oraclePx * ctx.funding;
     return Number.isFinite(amount) ? amount : null;
   }
+  const totals = $derived.by(() => {
+    if (inventory.broken.length) return null;
+    let gross = 0, delta = 0, margin = 0, since = 0;
+    let today: number | null = todayFunding ? 0 : null;
+    let hourly: number | null = 0;
+    for (const p of openPositions) {
+      const notional = Math.abs(p.positionValue);
+      gross += notional;
+      delta += Math.sign(p.szi) * notional;
+      margin += p.marginUsed;
+      since -= p.fundingSinceOpen;
+      if (today !== null) today += todayFunding?.get(p.coin) ?? 0;
+      if (hourly !== null) {
+        const amount = hourlyFunding(p);
+        hourly = amount === null ? null : hourly + amount;
+      }
+    }
+    const { equity } = summary();
+    return { gross, delta, margin, since, today, hourly, leverage: Number.isFinite(equity) && equity > 0 ? gross / equity : null };
+  });
+  const fundingAmount = (n: number | null) => n === null ? '—' : Math.abs(n) > 0 && Math.abs(n) < 0.01 ? `${n < 0 ? '-' : '+'}$${fmtNum(Math.abs(n), 4)}` : `${n > 0 ? '+' : ''}${fmtUsd(n)}`;
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
   const priceTone = (p: Position) => {
     const move = (mark(p) - p.entryPx) * Math.sign(p.szi);
@@ -100,19 +121,16 @@
 
 {#snippet coinCell(p: Position)}<span class="identity"><button class="link" class:buy={p.szi > 0} class:sell={p.szi < 0} onclick={() => selectCoin(p.coin)}><Coin coin={p.coin} /></button><span class="leverage" data-testid="position-leverage">{p.leverage.value}×</span></span>{/snippet}
 {#snippet usd(n: number, card = false)}<span title={Math.abs(n) >= (card ? 1000 : 1e5) ? fmtUsd(n) : undefined}>{card && Math.abs(n) >= 1000 ? `${n < 0 ? '-' : ''}$${fmtCompact(Math.abs(n))}` : fmtUsdShort(n)}</span>{/snippet}
-{#snippet fundingAmount(n: number | null, card = false)}
-  <span class="num" class:buy={n !== null && n > 0} class:sell={n !== null && n < 0}>
-    {#if n === null}—{:else if n !== 0 && Math.abs(n) < 0.01}{n < 0 ? '-' : '+'}${fmtNum(Math.abs(n), 4)}{:else}{n > 0 ? '+' : ''}{@render usd(n, card)}{/if}
-  </span>
+{#snippet fundingValue(since: number | null, today: number | null, hourly: number | null, total = false)}
+  {@const details = `Since open  ${fundingAmount(since)}\nToday UTC  ${fundingAmount(today)}\nEst. / hr  ${fundingAmount(hourly)}\nEst. / day  ${fundingAmount(hourly === null ? null : hourly * 24)}`}
+  <button type="button" class="funding-value num" class:buy={(since ?? 0) > 0} class:sell={(since ?? 0) < 0}
+    data-testid={total ? 'positions-total-funding' : 'position-funding'} data-help-detail={details}
+    aria-label={`${total ? 'Total funding for open positions' : 'Position funding'}. ${details.replaceAll('\n', '. ')}`}>
+    {since === null ? '—' : Math.abs(since) >= 1000 && cards.current ? `${since < 0 ? '-' : ''}$${fmtCompact(Math.abs(since))}` : since !== 0 && Math.abs(since) < 0.01 ? fundingAmount(since) : fmtUsdShort(since)}
+  </button>
 {/snippet}
-{#snippet fundingStats(p: Position, card = false)}
-  {@const hourly = hourlyFunding(p)}
-  <div class="funding-stats">
-    {#if !card}<div title="Net funding on this position since opening"><small>Since open</small>{@render fundingAmount(-p.fundingSinceOpen)}</div>{/if}
-    <div title="Net funding settled since 00:00 UTC for this market" data-testid="position-funding-today"><small>Today UTC</small>{@render fundingAmount(todayFunding ? todayFunding.get(p.coin) ?? 0 : null, card)}</div>
-    <div title="Estimated next hourly payment using the current size, oracle price and funding rate" data-testid="position-funding-hour"><small>Est. / hr</small>{@render fundingAmount(hourly, card)}</div>
-    <div title="Estimated funding over 24 hours if the position, oracle price and hourly rate stay constant" data-testid="position-funding-day"><small>Est. / day</small>{@render fundingAmount(hourly === null ? null : hourly * 24, card)}</div>
-  </div>
+{#snippet positionFunding(p: Position)}
+  {@render fundingValue(-p.fundingSinceOpen, todayFunding ? todayFunding.get(p.coin) ?? 0 : null, hourlyFunding(p))}
 {/snippet}
 {#snippet roe(p: Position)}{Math.abs(p.roe * 100) >= 1000 ? `${p.roe < 0 ? '-' : '+'}${fmtCompact(Math.abs(p.roe * 100))}%` : fmtPct(p.roe)}{/snippet}
 {#snippet pnl(p: Position)}
@@ -166,16 +184,14 @@
               <div class="field"><span class="label">Mark</span><span class="value num price mark {tone}" data-testid="position-mark">{fmtPx(mark(p), dec(p.coin))}</span></div>
               <div class="field"><span class="label">Value</span><span class="value num">{@render usd(p.positionValue, true)}</span></div>
               <div class="field margin" data-testid="position-margin"><span class="label">Margin <span class="margin-mode dim" data-testid="position-margin-mode">{p.leverage.type === 'cross' ? 'Cross' : 'Isolated'}</span></span><span class="value num">{@render margin(p, true)}</span></div>
-              <div class="field"><span class="label">Funding</span><span class="value num" class:buy={p.fundingSinceOpen <= 0} class:sell={p.fundingSinceOpen > 0}>{@render usd(-p.fundingSinceOpen, true)}</span></div>
+              <div class="field"><span class="label">Funding</span><span class="value">{@render positionFunding(p)}</span></div>
               <div class="field"><span class="label">TP / SL</span><span class="value num">{@render tpsl(p, true)}</span></div>
             </div>
-            {@render fundingStats(p, true)}
           {/if}
           {#if canTrade}<div class="position-controls" data-testid="position-controls">{@render actions(p)}</div>{/if}
         </div>
       </div>
     {/each}
-    <p class="total dim"><abbr title="Open positions, since opening">Total funding</abbr> <b class="num" class:buy={totalFunding >= 0} class:sell={totalFunding < 0} data-testid="positions-total-funding">{@render usd(totalFunding)}</b></p>
   </div>
 {:else}
   <table class="pin-last">
@@ -192,14 +208,23 @@
           <td class="num" class:buy={p.uPnl >= 0} class:sell={p.uPnl < 0}>{@render pnl(p)}</td>
           <td class="num">{@render liq(p)}</td>
           <td class="num margin" data-testid="position-margin">{@render margin(p)}</td>
-          <td>{@render fundingStats(p)}</td>
+          <td>{@render positionFunding(p)}</td>
           <td class="num">{@render tpsl(p)}</td>
           <td>{#if canTrade}{@render actions(p)}{/if}</td>
         </tr>
       {/each}
     </tbody>
-    <tfoot><tr><td colspan="8" class="dim">Total funding · open positions, since opening</td><td class="num" class:buy={totalFunding >= 0} class:sell={totalFunding < 0} data-testid="positions-total-funding">{@render usd(totalFunding)}</td><td colspan="2"></td></tr></tfoot>
   </table>
+{/if}
+{#if openPositions.length}
+  <div class="totals" aria-label="All open perp positions" role="group" data-testid="positions-totals">
+    <span class="dim" title="Totals include all open perp positions, across all filters">Overall</span>
+    <span><span class="dim" title="Sum of absolute position notionals">Exposure</span><b class="num" data-testid="positions-total-exposure">{@render usd(totals?.gross ?? NaN)}</b></span>
+    <span><span class="dim" title="Long notional minus short notional, in dollars">Net delta</span><b class="num" class:buy={(totals?.delta ?? 0) > 0} class:sell={(totals?.delta ?? 0) < 0} data-testid="positions-net-delta">{@render usd(totals?.delta ?? NaN)}</b></span>
+    <span><span class="dim" title="Gross perp exposure divided by account equity">Effective leverage</span><b class="num" data-testid="positions-effective-leverage">{totals?.leverage == null ? '—' : `${fmtNum(totals.leverage, 2)}×`}</b></span>
+    <span><span class="dim" title="Sum of margin used by open positions">Margin used</span><b class="num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b></span>
+    <span><span class="dim">Funding</span>{@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}</span>
+  </div>
 {/if}
 
 <style>
@@ -255,11 +280,10 @@
   .price.mark.buy { color: var(--buy-text); }
   .price.mark.sell { color: var(--sell-text); }
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
-  .total { display: flex; justify-content: space-between; gap: 8px; padding: 0 2px; }
-  .funding-stats { display: grid; grid-template-columns: repeat(2, max-content); gap: 2px 8px; }
-  .funding-stats > div { display: grid; white-space: nowrap; }
-  .funding-stats small { color: var(--dim); font-size: max(9px, 0.82em); }
-  .card .funding-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; padding: 6px 8px; border-top: 1px solid var(--line); }
+  .totals > span { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
+  .totals .funding-value { font-weight: 700; }
   .margin [data-help] { cursor: default; text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
   .margin [data-help]:hover, :global(abbr:hover) { text-decoration-color: var(--dim); }
 </style>

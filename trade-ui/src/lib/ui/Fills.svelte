@@ -100,7 +100,7 @@
   </div>
 {/if}
 {#snippet dir(f: Fill, partial = false)}{@const label = liqLabel(f)}{#if label}<span class="liq" class:hover={settings.display.lol && f.liquidation} data-testid="liq-marker">{label[0]}</span>: {label[1]}{:else}{f.dir}{#if f.priceImproved}{' '}<abbr data-testid="price-improved" title={IMPROVED}>(Price Improved)</abbr>{/if}{/if}{#if partial}{' · '}<span class="partial">Partial fill</span>{/if}{/snippet}
-{#snippet price(f: Fill)}{#if f.liquidation && f.liqMarkPx !== null}<abbr data-testid="liq-price" title={liqNote(f)}>{px(f, shownPx(f))}</abbr>{:else}{px(f, f.px)}{/if}{/snippet}
+{#snippet price(f: Fill)}{#if f.liquidation && f.liqMarkPx !== null}<abbr data-testid="liq-price" data-help-numbers title={liqNote(f)}>{px(f, shownPx(f))}</abbr>{:else}{px(f, f.px)}{/if}{/snippet}
 {#snippet value(f: Fill)}{isSpot(f.coin) ? `${fmtNum(shownPx(f) * f.sz, 2)} ${quoteOf(f.coin)}` : fmtUsd(shownPx(f) * f.sz)}{/snippet}
 {#snippet entry(f: Fill)}{@const px = entryPxOf(f, isSpot(f.coin))}{Number.isFinite(px) ? fmtPx(px, dec(f.coin)) : '—'}{/snippet}
 {#snippet fee(f: Fill)}{f.feeToken === 'USDC' ? fmtNum(f.fee, 4) : fmtSz(f.fee)} {f.feeToken}{/snippet}

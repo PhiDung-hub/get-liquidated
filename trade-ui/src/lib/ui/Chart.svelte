@@ -26,7 +26,6 @@
   import Menu from './order/Menu.svelte';
   import { cancelLine, lineLabels, positionLines, signed, toggleGroup } from './chart/positionLines.svelte';
   import { bindingsFor, keyLabel, type ActionId } from '$lib/hotkeys/keymap';
-  import { inZen } from './zen';
   import ZenToggle from './ZenToggle.svelte';
   import { chartTools, escapeChart, pickSelected } from './chart/tools.svelte';
   import { measure } from './chart/measure.svelte';
@@ -285,7 +284,7 @@
   let legend = $state<{ bar: Bar; vals: Record<string, string>; cols: Record<string, string>; focused: boolean }>();
   const loadCoach = () => import('./ai/ChartCoach.svelte').then((m) => m.default).catch(() => { coach.open = false; toast.error('Chart coach could not load. Reload the page and try again.'); return null; });
   const narrow = new MediaQuery('max-width: 900px');
-  const showZen = $derived(narrow.current || fullscreen || inZen());
+  const showZen = $derived(narrow.current || fullscreen);
   // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the view controls.
   const compact = $derived(chartWidth > 0 && chartWidth < 560);
   const inlineRanges = $derived(chartWidth >= Math.max(672, 48 * settings.display.fs));

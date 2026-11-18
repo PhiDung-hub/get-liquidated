@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { dailyFunding, FUNDING_DAY_MS } from '$lib/account/funding.svelte';
-  import { inventory, liqDist, markOf as mark, summary, type Position } from '$lib/account/inventory.svelte';
+  import { inventory, liqDist, markOf as mark, type Position } from '$lib/account/inventory.svelte';
   import { isTrailing, openOrders } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { listed, maintenance, meta } from '$lib/market/meta.svelte';
@@ -53,13 +53,11 @@
   }
   const totals = $derived.by(() => {
     if (inventory.broken.length) return null;
-    let gross = 0, delta = 0, margin = 0, since = 0;
+    let pnl = 0, margin = 0, since = 0;
     let today: number | null = todayFunding ? 0 : null;
     let hourly: number | null = 0;
     for (const p of openPositions) {
-      const notional = Math.abs(p.positionValue);
-      gross += notional;
-      delta += Math.sign(p.szi) * notional;
+      pnl += p.uPnl;
       margin += p.marginUsed;
       since -= p.fundingSinceOpen;
       if (today !== null) today += todayFunding?.get(p.coin) ?? 0;
@@ -68,8 +66,7 @@
         hourly = amount === null ? null : hourly + amount;
       }
     }
-    const { equity } = summary();
-    return { gross, delta, margin, since, today, hourly, leverage: Number.isFinite(equity) && equity > 0 ? gross / equity : null };
+    return { pnl, margin, since, today, hourly };
   });
   const fundingAmount = (n: number | null) => n === null ? '—' : Math.abs(n) > 0 && Math.abs(n) < 0.01 ? `${n < 0 ? '-' : '+'}$${fmtNum(Math.abs(n), 4)}` : `${n > 0 ? '+' : ''}${fmtUsd(n)}`;
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
@@ -160,20 +157,12 @@
 {/snippet}
 {#snippet closeAll()}<button class="sweep" data-testid="flatten-open" onclick={(e) => sweepOf(e, 'flatten')}>Close All</button>{/snippet}
 
-{#snippet overall()}
-  <span class="total-label" title="Totals include all open perp positions, across all filters">Overall</span>
-  <span data-help title="Effective leverage: gross perp exposure divided by account equity"><b class="num" data-testid="positions-effective-leverage">{totals?.leverage == null ? '—' : `${fmtNum(totals.leverage, 2)}×`}</b> <span class="leverage">eff. lev.</span></span>
+{#snippet pnlTotal()}
+  <b class="sum num" class:buy={(totals?.pnl ?? 0) > 0} class:sell={(totals?.pnl ?? 0) < 0} data-testid="positions-total-pnl">{@render usd(totals?.pnl ?? NaN)}</b>
 {/snippet}
-{#snippet totalUsd(label: string, title: string, value: number | undefined, testId: string, signed = false)}
-  <span class="total-label" {title}>{label}</span>
-  <b class="num" class:buy={signed && (value ?? 0) > 0} class:sell={signed && (value ?? 0) < 0} data-testid={testId}>{@render usd(value ?? NaN)}</b>
-{/snippet}
-{#snippet deltaTotal()}{@render totalUsd('Net delta', 'Long notional minus short notional, in dollars', totals?.delta, 'positions-net-delta', true)}{/snippet}
-{#snippet exposureTotal()}{@render totalUsd('Exposure', 'Sum of absolute position notionals', totals?.gross, 'positions-total-exposure')}{/snippet}
-{#snippet marginTotal()}{@render totalUsd('Margin used', 'Sum of margin used by open positions', totals?.margin, 'positions-total-margin')}{/snippet}
+{#snippet marginTotal()}<b class="sum num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b>{/snippet}
 {#snippet fundingTotal()}
-  <span class="total-label">Funding</span>
-  {@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}
+  <span class="sum">{@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}</span>
 {/snippet}
 
 {#if !rows.length}
@@ -232,10 +221,9 @@
     </tbody>
     <tfoot class="totals" aria-label="All open perp positions" data-testid="positions-totals">
       <tr>
-        <td>{@render overall()}</td>
-        <td>{@render deltaTotal()}</td>
-        <td>{@render exposureTotal()}</td>
-        <td colspan="4"></td>
+        <td colspan="5"></td>
+        <td>{@render pnlTotal()}</td>
+        <td></td>
         <td>{@render marginTotal()}</td>
         <td>{@render fundingTotal()}</td>
         <td></td><td></td>
@@ -245,11 +233,9 @@
 {/if}
 {#if openPositions.length && (cards.current || !rows.length)}
   <div class="totals summary-grid" aria-label="All open perp positions" role="group" data-testid="positions-totals">
-    <div>{@render overall()}</div>
-    <div>{@render deltaTotal()}</div>
-    <div>{@render exposureTotal()}</div>
-    <div>{@render marginTotal()}</div>
-    <div>{@render fundingTotal()}</div>
+    <div><span class="total-label">Unrealized PnL</span>{@render pnlTotal()}</div>
+    <div><span class="total-label" title="Sum of margin used by open positions">Margin used</span>{@render marginTotal()}</div>
+    <div><span class="total-label">Funding</span>{@render fundingTotal()}</div>
   </div>
 {/if}
 
@@ -306,8 +292,11 @@
   .price.mark.buy { color: var(--buy-text); }
   .price.mark.sell { color: var(--sell-text); }
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 4px 8px; padding: 4px 8px; }
-  .total-label { display: block; color: var(--dim); font-weight: 400; }
+  tfoot td { padding-block: 12px 6px; vertical-align: bottom; }
+  .sum { position: relative; display: inline-block; padding-top: 5px; }
+  .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
+  .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }
   .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
   .totals .funding-value { font-weight: 700; }
   .totals .funding-value:not(.buy, .sell) { color: inherit; }

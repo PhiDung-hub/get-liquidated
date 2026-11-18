@@ -19,6 +19,17 @@
   const usdOf = (n: number) => (loaded ? fmtUsd(n) : '—');
   type Row = { id: string; label: string; value: string; title?: string; pnl?: boolean };
   const upnl = $derived<Row>({ id: 'inv-upnl', label: 'Unrealized PnL', value: usdOf(s.uPnl), title: 'excl. funding & fees', pnl: true });
+  const notionals = $derived.by(() => {
+    if (!loaded || inventory.broken.length) return { gross: NaN, delta: NaN };
+    let gross = 0, delta = 0;
+    for (const p of inventory.positions) {
+      if (!p.szi) continue;
+      const value = Math.abs(p.positionValue);
+      gross += value;
+      delta += Math.sign(p.szi) * value;
+    }
+    return { gross, delta };
+  });
   // HL's account panel rows and labels: one set for portfolio-margin and unified accounts, Spot, Perps and Perps Overview for the rest.
   const rows = $derived.by((): Row[] => {
     if (s.mode === 'portfolioMargin' || s.mode === 'unifiedAccount') {
@@ -46,7 +57,12 @@
   });
   const groups = $derived([
     { title: 'Balance', rows: rows.slice(0, rows.findIndex((r) => r.id === 'inv-ratio')) },
-    { title: 'Margin', rows: rows.slice(rows.findIndex((r) => r.id === 'inv-ratio')) }
+    { title: 'Margin', rows: rows.slice(rows.findIndex((r) => r.id === 'inv-ratio')) },
+    { title: 'Perp exposure', rows: [
+      { id: 'inv-gross-exposure', label: 'Gross exposure', value: usdOf(notionals.gross), title: 'Sum of absolute open perp position values' },
+      { id: 'inv-net-delta', label: 'Net delta', value: usdOf(notionals.delta), title: 'Long minus short perp exposure, in dollars' },
+      { id: 'inv-effective-leverage', label: 'Account Leverage', value: lev(s.equity > 0 ? notionals.gross / s.equity : NaN), title: 'Effective account leverage: gross perp exposure divided by total account equity' }
+    ] }
   ]);
   const whole = (n: number) => `$${fmtNum(n, 0)}`;
   const rate = (r: number) => `${(r * 100).toFixed(4)}%`;
@@ -56,6 +72,7 @@
   );
   function tone(r: Row) {
     if (!loaded) return '';
+    if (r.id === 'inv-net-delta') return notionals.delta > 0 ? 'buy' : notionals.delta < 0 ? 'sell' : '';
     if (r.pnl) return Number.isFinite(s.uPnl) ? s.uPnl < 0 ? 'sell' : 'buy' : '';
     if (r.id === 'inv-available' && Number.isFinite(s.available)) return s.available > 0 ? 'buy' : s.available < 0 ? 'sell' : 'warn';
     const ratio = r.id === 'inv-ratio' ? s.ratio : r.id === 'inv-borrow' ? s.borrow : NaN;

@@ -160,6 +160,22 @@
 {/snippet}
 {#snippet closeAll()}<button class="sweep" data-testid="flatten-open" onclick={(e) => sweepOf(e, 'flatten')}>Close All</button>{/snippet}
 
+{#snippet overall()}
+  <span class="total-label" title="Totals include all open perp positions, across all filters">Overall</span>
+  <span data-help title="Effective leverage: gross perp exposure divided by account equity"><b class="num" data-testid="positions-effective-leverage">{totals?.leverage == null ? '—' : `${fmtNum(totals.leverage, 2)}×`}</b> <span class="leverage">eff. lev.</span></span>
+{/snippet}
+{#snippet totalUsd(label: string, title: string, value: number | undefined, testId: string, signed = false)}
+  <span class="total-label" {title}>{label}</span>
+  <b class="num" class:buy={signed && (value ?? 0) > 0} class:sell={signed && (value ?? 0) < 0} data-testid={testId}>{@render usd(value ?? NaN)}</b>
+{/snippet}
+{#snippet deltaTotal()}{@render totalUsd('Net delta', 'Long notional minus short notional, in dollars', totals?.delta, 'positions-net-delta', true)}{/snippet}
+{#snippet exposureTotal()}{@render totalUsd('Exposure', 'Sum of absolute position notionals', totals?.gross, 'positions-total-exposure')}{/snippet}
+{#snippet marginTotal()}{@render totalUsd('Margin used', 'Sum of margin used by open positions', totals?.margin, 'positions-total-margin')}{/snippet}
+{#snippet fundingTotal()}
+  <span class="total-label">Funding</span>
+  {@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}
+{/snippet}
+
 {#if !rows.length}
   {#if canTrade && !cards.current && (openOrders.list.length || inventory.positions.some((p) => p.szi !== 0))}<div class="sweeps">{@render closeAll()}</div>{/if}
   <p class="dim" data-testid="account-empty">{viewAddress() && !inventory.loaded ? 'Loading positions…' : inventory.positions.some((p) => p.szi !== 0) ? 'No positions match the filter.' : 'No open positions.'}</p>
@@ -214,16 +230,26 @@
         </tr>
       {/each}
     </tbody>
+    <tfoot class="totals" aria-label="All open perp positions" data-testid="positions-totals">
+      <tr>
+        <td>{@render overall()}</td>
+        <td>{@render deltaTotal()}</td>
+        <td>{@render exposureTotal()}</td>
+        <td colspan="4"></td>
+        <td>{@render marginTotal()}</td>
+        <td>{@render fundingTotal()}</td>
+        <td></td><td></td>
+      </tr>
+    </tfoot>
   </table>
 {/if}
-{#if openPositions.length}
-  <div class="totals" aria-label="All open perp positions" role="group" data-testid="positions-totals">
-    <span class="dim" title="Totals include all open perp positions, across all filters">Overall</span>
-    <span><span class="dim" title="Sum of absolute position notionals">Exposure</span><b class="num" data-testid="positions-total-exposure">{@render usd(totals?.gross ?? NaN)}</b></span>
-    <span><span class="dim" title="Long notional minus short notional, in dollars">Net delta</span><b class="num" class:buy={(totals?.delta ?? 0) > 0} class:sell={(totals?.delta ?? 0) < 0} data-testid="positions-net-delta">{@render usd(totals?.delta ?? NaN)}</b></span>
-    <span><span class="dim" title="Gross perp exposure divided by account equity">Effective leverage</span><b class="num" data-testid="positions-effective-leverage">{totals?.leverage == null ? '—' : `${fmtNum(totals.leverage, 2)}×`}</b></span>
-    <span><span class="dim" title="Sum of margin used by open positions">Margin used</span><b class="num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b></span>
-    <span><span class="dim">Funding</span>{@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}</span>
+{#if openPositions.length && (cards.current || !rows.length)}
+  <div class="totals summary-grid" aria-label="All open perp positions" role="group" data-testid="positions-totals">
+    <div>{@render overall()}</div>
+    <div>{@render deltaTotal()}</div>
+    <div>{@render exposureTotal()}</div>
+    <div>{@render marginTotal()}</div>
+    <div>{@render fundingTotal()}</div>
   </div>
 {/if}
 
@@ -280,10 +306,13 @@
   .price.mark.buy { color: var(--buy-text); }
   .price.mark.sell { color: var(--sell-text); }
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
-  .totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; padding: 6px 8px; border-top: 1px solid var(--line); }
-  .totals > span { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 4px 8px; padding: 4px 8px; }
+  .total-label { display: block; color: var(--dim); font-weight: 400; }
   .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
   .totals .funding-value { font-weight: 700; }
+  .totals .funding-value:not(.buy, .sell) { color: inherit; }
+  .funding-value.buy { color: var(--buy-text); }
+  .funding-value.sell { color: var(--sell-text); }
   .margin [data-help] { cursor: default; text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
   .margin [data-help]:hover, :global(abbr:hover) { text-decoration-color: var(--dim); }
 </style>

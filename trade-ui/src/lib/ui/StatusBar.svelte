@@ -11,7 +11,7 @@
   import { symOf } from '$lib/market/meta.svelte';
   import { HOTKEY_TYPES, settings, type HotkeyType, type Sizing } from '$lib/settings/settings.svelte';
   import { fmtCompact } from '$lib/util/format';
-  import { version } from '$app/environment';
+  import BuildProof from './BuildProof.svelte';
   import { sideOf } from './toast.svelte';
 
   const DAY = 86_400_000;
@@ -71,7 +71,7 @@
   {#if budget !== null}<span class="seg" class:warn={budget < 500} data-testid="status-budget" title="{budget.toLocaleString()} address-based action requests remaining. This allowance grows with traded volume; it is separate from IP rate limits."><span class="label">Requests</span>{' '}<b>{fmtCompact(budget)}</b>{' '}<span class="unit">left</span></span>{/if}
   <span class="seg" class:warn={openOrders.list.length >= 900} data-testid="status-orders" title="Open orders / base limit. Hyperliquid can allow more orders as traded volume grows."><span class="label">Orders</span>{' '}<b>{openOrders.list.length}</b>{' '}<span class="unit">/ 1,000</span></span>
   {#if agentDays !== null}<span class="seg" data-testid="status-agent" class:warn={agentDays < 7} title="Trading agent authorization expires in {Math.floor(agentDays)} days"><span class="label">agent</span>{' '}<span><b>{Math.floor(agentDays)}</b><span class="unit">d</span></span></span>{/if}
-  <span class="seg dim version" data-testid="status-version" title={version}>v{version.split(' · ')[0]}</span>
+  <span class="seg dim version" data-testid="status-version"><BuildProof /></span>
 </footer>
 
 <style>

@@ -5,12 +5,15 @@
 </script>
 
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { dailyFunding, FUNDING_DAY_MS } from '$lib/account/funding.svelte';
   import { inventory, liqDist, markOf as mark, type Position } from '$lib/account/inventory.svelte';
   import { isTrailing, openOrders } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { listed, maintenance, meta } from '$lib/market/meta.svelte';
-  import { selectCoin } from '$lib/market/market.svelte';
-  import { fmtCompact, fmtPct, fmtPx, fmtSz, fmtUsd, fmtUsdShort } from '$lib/util/format';
+  import { market, selectCoin } from '$lib/market/market.svelte';
+  import { socket } from '$lib/transport/ws.svelte';
+  import { fmtCompact, fmtNum, fmtPct, fmtPx, fmtSz, fmtUsd, fmtUsdShort } from '$lib/util/format';
   import { toast } from './toast.svelte';
   import Coin from './Coin.svelte';
   import { ui, type Modal } from './state.svelte';
@@ -30,6 +33,24 @@
   ], '');
   const rows = $derived(sorter.sort(inventory.positions.filter((p) => p.szi !== 0 && inFilter(p.coin, p.szi > 0))));
   const totalFunding = $derived(-rows.reduce((sum, p) => sum + p.fundingSinceOpen, 0));
+  let dayStart = $state<number | null>(null);
+  onMount(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const update = () => {
+      const now = Date.now();
+      dayStart = Math.floor(now / FUNDING_DAY_MS) * FUNDING_DAY_MS;
+      timer = setTimeout(update, dayStart + FUNDING_DAY_MS - now);
+    };
+    update();
+    return () => clearTimeout(timer);
+  });
+  const todayFunding = $derived(dayStart !== null && socket.state === 'open' ? dailyFunding(dayStart) : null);
+  function hourlyFunding(p: Position): number | null {
+    const ctx = (p.coin === market.coin ? market.ctx : null) ?? meta.ctxs.get(p.coin);
+    if (socket.state !== 'open' || !ctx || ctx.oraclePx === null || !(ctx.oraclePx > 0) || ctx.funding === null) return null;
+    const amount = -p.szi * ctx.oraclePx * ctx.funding;
+    return Number.isFinite(amount) ? amount : null;
+  }
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
   const priceTone = (p: Position) => {
     const move = (mark(p) - p.entryPx) * Math.sign(p.szi);
@@ -79,6 +100,20 @@
 
 {#snippet coinCell(p: Position)}<span class="identity"><button class="link" class:buy={p.szi > 0} class:sell={p.szi < 0} onclick={() => selectCoin(p.coin)}><Coin coin={p.coin} /></button><span class="leverage" data-testid="position-leverage">{p.leverage.value}×</span></span>{/snippet}
 {#snippet usd(n: number, card = false)}<span title={Math.abs(n) >= (card ? 1000 : 1e5) ? fmtUsd(n) : undefined}>{card && Math.abs(n) >= 1000 ? `${n < 0 ? '-' : ''}$${fmtCompact(Math.abs(n))}` : fmtUsdShort(n)}</span>{/snippet}
+{#snippet fundingAmount(n: number | null, card = false)}
+  <span class="num" class:buy={n !== null && n > 0} class:sell={n !== null && n < 0}>
+    {#if n === null}—{:else if n !== 0 && Math.abs(n) < 0.01}{n < 0 ? '-' : '+'}${fmtNum(Math.abs(n), 4)}{:else}{n > 0 ? '+' : ''}{@render usd(n, card)}{/if}
+  </span>
+{/snippet}
+{#snippet fundingStats(p: Position, card = false)}
+  {@const hourly = hourlyFunding(p)}
+  <div class="funding-stats">
+    {#if !card}<div title="Net funding on this position since opening"><small>Since open</small>{@render fundingAmount(-p.fundingSinceOpen)}</div>{/if}
+    <div title="Net funding settled since 00:00 UTC for this market" data-testid="position-funding-today"><small>Today UTC</small>{@render fundingAmount(todayFunding ? todayFunding.get(p.coin) ?? 0 : null, card)}</div>
+    <div title="Estimated next hourly payment using the current size, oracle price and funding rate" data-testid="position-funding-hour"><small>Est. / hr</small>{@render fundingAmount(hourly, card)}</div>
+    <div title="Estimated funding over 24 hours if the position, oracle price and hourly rate stay constant" data-testid="position-funding-day"><small>Est. / day</small>{@render fundingAmount(hourly === null ? null : hourly * 24, card)}</div>
+  </div>
+{/snippet}
 {#snippet roe(p: Position)}{Math.abs(p.roe * 100) >= 1000 ? `${p.roe < 0 ? '-' : '+'}${fmtCompact(Math.abs(p.roe * 100))}%` : fmtPct(p.roe)}{/snippet}
 {#snippet pnl(p: Position)}
   <span class="pnl"><span data-testid="position-pnl" title="{fmtUsd(p.uPnl)} ({fmtPct(p.roe)})">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render roe(p)}</span>)</span>
@@ -134,6 +169,7 @@
               <div class="field"><span class="label">Funding</span><span class="value num" class:buy={p.fundingSinceOpen <= 0} class:sell={p.fundingSinceOpen > 0}>{@render usd(-p.fundingSinceOpen, true)}</span></div>
               <div class="field"><span class="label">TP / SL</span><span class="value num">{@render tpsl(p, true)}</span></div>
             </div>
+            {@render fundingStats(p, true)}
           {/if}
           {#if canTrade}<div class="position-controls" data-testid="position-controls">{@render actions(p)}</div>{/if}
         </div>
@@ -156,7 +192,7 @@
           <td class="num" class:buy={p.uPnl >= 0} class:sell={p.uPnl < 0}>{@render pnl(p)}</td>
           <td class="num">{@render liq(p)}</td>
           <td class="num margin" data-testid="position-margin">{@render margin(p)}</td>
-          <td class="num" class:buy={p.fundingSinceOpen <= 0} class:sell={p.fundingSinceOpen > 0}>{@render usd(-p.fundingSinceOpen)}</td>
+          <td>{@render fundingStats(p)}</td>
           <td class="num">{@render tpsl(p)}</td>
           <td>{#if canTrade}{@render actions(p)}{/if}</td>
         </tr>
@@ -220,6 +256,10 @@
   .price.mark.sell { color: var(--sell-text); }
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
   .total { display: flex; justify-content: space-between; gap: 8px; padding: 0 2px; }
+  .funding-stats { display: grid; grid-template-columns: repeat(2, max-content); gap: 2px 8px; }
+  .funding-stats > div { display: grid; white-space: nowrap; }
+  .funding-stats small { color: var(--dim); font-size: max(9px, 0.82em); }
+  .card .funding-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .margin [data-help] { cursor: default; text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
   .margin [data-help]:hover, :global(abbr:hover) { text-decoration-color: var(--dim); }
 </style>

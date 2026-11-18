@@ -7,8 +7,10 @@
   import { persist, settings } from '$lib/settings/settings.svelte';
   import { ticket } from '$lib/orders/ticket.svelte';
   import { fmtSz } from '$lib/util/format';
+  import { detail, refers } from './AiMessage.svelte';
 
-  let { s, now }: { s: Suggestion; now: number } = $props();
+  let { s, now, flat = false }: { s: Suggestion; now: number; flat?: boolean } = $props();
+  const levels = $derived([s.px, s.tp, s.sl]);
 
   function unusable(coin: string): string {
     if (meta.byName.get(coin)?.isDelisted) return `${coin} is delisted`;
@@ -67,11 +69,11 @@
   };
 </script>
 
-<article class="card" data-testid="ai-card" data-id={s.id}>
-  <p class="line" data-testid="ai-card-line">
+<article class="card" class:flat data-testid="ai-card" data-id={s.id} {@attach detail(() => levels)}>
+  <p class="line" class:hit={refers(levels)} data-testid="ai-card-line">
     <b class:buy={s.side === 'buy'} class:sell={s.side === 'sell'}>{s.side.toUpperCase()} {s.coin}</b> · {terms}
   </p>
-  <p class="reason" class:open bind:this={reason} data-testid="ai-reason">{s.reason}</p>
+  <p class="reason ai-why" class:open bind:this={reason} data-testid="ai-reason" title="A short summary the AI chose to publish, not its private reasoning">{s.reason}</p>
   {#if long || open}
     <button class="more" data-testid="ai-more" onclick={tap(() => (open = !open))}>{open ? 'less' : 'more'}</button>
   {/if}
@@ -85,8 +87,10 @@
 
 <style>
   .card { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--surface); border-radius: var(--radius); }
+  .card.flat { align-self: stretch; padding: 0; border: 0; background: none; }
   p { margin: 0; }
   .line { color: var(--bright); overflow-wrap: anywhere; }
+  .line.hit { color: var(--accent); }
   .line b { font-weight: 600; }
   .reason { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
   .reason.open { -webkit-line-clamp: unset; line-clamp: unset; }

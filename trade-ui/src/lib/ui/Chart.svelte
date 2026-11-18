@@ -5,7 +5,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
+  import { flushSync, onMount, tick, untrack } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { createChart, CandlestickSeries, CrosshairMode, HistogramSeries, PriceScaleMode, TickMarkType, type AutoscaleInfo, type Time, type IChartApi, type ISeriesApi, type Logical, type MouseEventParams, type UTCTimestamp } from 'lightweight-charts';
   import { positionOf } from '$lib/account/inventory.svelte';
@@ -73,7 +73,32 @@
   });
   // Zone offsets change on a quarter hour (Lord Howe's DST starts at :30 UTC), so the label is recomputed only then.
   const quarterNow = $derived(Math.floor(now / 900_000));
-  const clockOffset = $derived(zoneFormats.offset.formatToParts(quarterNow * 900_000).find((part) => part.type === 'timeZoneName')!.value.replace('GMT', 'UTC').replace(/^UTC[+-]0$/, 'UTC'));
+  const offsetAt = (format: Intl.DateTimeFormat, at: number) =>
+    format.formatToParts(at).find((part) => part.type === 'timeZoneName')!.value.replace('GMT', 'UTC').replace(/^UTC[+-]0$/, 'UTC');
+  const clockOffset = $derived(offsetAt(zoneFormats.offset, quarterNow * 900_000));
+  const otherZones = $derived([...new Set([...allZones, settings.chart.timezone])].filter((zone) => zone !== 'local' && !commonZones.includes(zone)).sort());
+  let offsets = $state.raw(new Map<string, string>());
+  let offsetsQuarter = -1;
+  function prepareZoneOffsets() {
+    const at = Date.now();
+    const quarter = Math.floor(at / 900_000);
+    if (quarter === offsetsQuarter && offsets.has(settings.chart.timezone)) return;
+    const labels = new Map<string, string>();
+    for (const zone of ['local', ...commonZones, ...otherZones]) {
+      const format = new Intl.DateTimeFormat('en-GB', { timeZone: zone === 'local' ? undefined : zone, timeZoneName: 'shortOffset' });
+      const offset = offsetAt(format, at);
+      labels.set(zone, offset === 'UTC' ? 'UTC+0' : offset);
+    }
+    offsetsQuarter = quarter;
+    // Native select popups can open on pointerdown before Svelte flushes pending text.
+    flushSync(() => (offsets = labels));
+  }
+  const zoneLabel = (zone: string) => {
+    const offset = offsets.get(zone);
+    if (zone === 'local') return `Local (${localZone.replaceAll('_', ' ')}${offset ? `, ${offset}` : ''})`;
+    const name = zone.replaceAll('_', ' ');
+    return offset ? `${name} (${offset})` : name;
+  };
   const timeMs = (value: Time) => typeof value === 'number' ? value * 1000 : typeof value === 'string' ? Date.parse(value + 'T00:00:00Z') : Date.UTC(value.year, value.month - 1, value.day);
   onMount(() => {
     localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -260,10 +285,10 @@
   let legend = $state<{ bar: Bar; vals: Record<string, string>; cols: Record<string, string>; focused: boolean }>();
   const loadCoach = () => import('./ai/ChartCoach.svelte').then((m) => m.default).catch(() => { coach.open = false; toast.error('Chart coach could not load. Reload the page and try again.'); return null; });
   const narrow = new MediaQuery('max-width: 900px');
-  // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the zen toggle's room.
+  // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the view controls.
   const compact = $derived(chartWidth > 0 && chartWidth < 560);
   const inlineRanges = $derived(chartWidth >= Math.max(672, 48 * settings.display.fs));
-  const room = $derived(chartWidth - (session.master ? 38 : 0) - (fullscreen ? 64 : 0));
+  const room = $derived(chartWidth - 6 * settings.display.fs - (fullscreen ? 64 : 0));
   const blocked = $derived(askBlocked());
   const toggleTool = (t: Parameters<typeof armTool>[0]) => (drawings.tool === t ? escapeChart() : armTool(t));
   type RailItem = { id: string; d: string; label: string; title: string; on?: boolean; off?: boolean; act: () => unknown; sep?: boolean };
@@ -1192,10 +1217,8 @@
       {#if !narrow.current && !fullscreen}<button data-testid="chart-add" disabled={settings.chart.panes.length >= MAX_PANES} title={settings.chart.panes.length >= MAX_PANES ? `At most ${MAX_PANES} extra charts` : `Open another chart beside this one (${nameOf(market.coin)}, another interval); ⇄ on it swaps it with this chart`} aria-label="Add a chart" onclick={(e) => (e.currentTarget.blur(), addPane())}>＋</button>{/if}
       <button data-testid="chart-indicators" aria-haspopup="dialog" aria-expanded={ui.overlay === 'indicators'} aria-label={compact && room < 19.3 * settings.display.fs ? 'Indicators' : null} title="Indicators ({keys('indicators')})" onclick={(e) => (e.currentTarget.blur(), toggleIndicators())}>{compact && room < 19.3 * settings.display.fs ? 'ƒx' : 'ƒx Indicators'}</button>
       <button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>
-      {#if session.master}
-        <button class:on={inZen()} data-testid="zen-toggle" title="Zen mode: chart only ({keys('zen')}, Esc exits)" aria-label="Zen mode" onclick={(e) => (e.currentTarget.blur(), setZen(!inZen()))}><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 4h16v16H4zM4 13h7v7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-      {/if}
     </span>
+    <button class="ui-tab zen-toggle" class:on={inZen()} aria-pressed={inZen()} disabled={!session.master} data-testid="zen-toggle" title={session.master ? `Chart-only view (${keys('zen')}, Esc exits)` : 'Connect a wallet to use Zen Mode'} onclick={(e) => { if (e.detail) e.currentTarget.blur(); setZen(!inZen()); }}>Zen Mode</button>
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
   <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
@@ -1313,10 +1336,10 @@
       <button data-testid="chart-goto" aria-label="Go to date" title="Go to a date or range" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'goto'))}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1" /><path d="M2 6.5h12M5 1.5v3M11 1.5v3" /></svg></button>
     </div>
     <span class="funding" data-testid="chart-funding" aria-hidden="true"></span>
-    <label class="timezone"><time data-testid="chart-clock" datetime={now ? new Date(now).toISOString() : null}>{#if now}{zoneFormats.clock.format(now)} ({clockOffset}){:else}—{/if}</time><span aria-hidden="true">⌄</span><select aria-label="Chart timezone" data-testid="chart-timezone" value={settings.chart.timezone} onchange={(e) => { settings.chart.timezone = e.currentTarget.value; persist(); e.currentTarget.blur(); }}>
-      <option value="local">Local ({localZone.replaceAll('_', ' ')})</option>
-      <optgroup label="Common regions">{#each commonZones as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>
-      <optgroup label="All regions">{#each [...new Set([...allZones, settings.chart.timezone])].filter((zone) => zone !== 'local' && !commonZones.includes(zone)).sort() as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>
+    <label class="timezone"><time data-testid="chart-clock" datetime={now ? new Date(now).toISOString() : null}>{#if now}{zoneFormats.clock.format(now)} ({clockOffset}){:else}—{/if}</time><span aria-hidden="true">⌄</span><select aria-label="Chart timezone" data-testid="chart-timezone" value={settings.chart.timezone} onfocus={prepareZoneOffsets} onpointerdown={prepareZoneOffsets} onkeydown={prepareZoneOffsets} onchange={(e) => { settings.chart.timezone = e.currentTarget.value; persist(); e.currentTarget.blur(); }}>
+      <option value="local">{zoneLabel('local')}</option>
+      <optgroup label="Common regions">{#each commonZones as zone}<option value={zone}>{zoneLabel(zone)}</option>{/each}</optgroup>
+      <optgroup label="All regions">{#each otherZones as zone}<option value={zone}>{zoneLabel(zone)}</option>{/each}</optgroup>
     </select></label>
     <span class="scales" onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) scaleMenu = false; }}>
       {#each [SCALES[2], SCALES[1], SCALES[0]] as [cmd, id, text, action]}
@@ -1364,7 +1387,7 @@
   .chart-refresh button:hover { color: var(--bright); }
   .chart-footer button { background: var(--panel); color: var(--dim); }
   .chart-coin { flex: none; padding: 4px 6px; color: var(--bright); font-weight: 600; white-space: nowrap; }
-  [data-testid='zen-toggle'] { display: inline-flex; align-items: center; padding: 4px 6px; }
+  .zen-toggle { flex: none; display: inline-flex; align-items: center; white-space: nowrap; margin-inline-start: 8px; padding: 4px 6px; }
   .chart-footer button.on { color: var(--accent); }
   .scales { position: relative; display: inline-flex; align-items: center; gap: inherit; }
   .scales > button { display: inline-flex; align-items: center; }

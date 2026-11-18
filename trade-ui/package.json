@@ -1,11 +1,11 @@
 {
   "name": "@trading/trade-ui",
   "private": true,
-  "version": "1.2.57",
+  "version": "1.2.58",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && node scripts/verify.mjs manifest build > build/manifest.json",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "check": "pnpm check:ui && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { agent, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, SESSION_NEEDS, setAutoCompact, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers, terminalSessions, type AutoCompact } from '$lib/agent/agent.svelte';
+  import { agent, companion, DESKTOP_ONLY, handheld, mentoring, pair, retryNow, SESSION_NEEDS, setAutoCompact, setChartSharing, setAdviceNotifications, SETUP_COMMAND, CONNECTOR_SOURCE, CONNECTOR_VERSION, connectorUpdate, updateConnector, signOut, stopAnswers, terminalSessions } from '$lib/agent/agent.svelte';
   import { settings, persist } from '$lib/settings/settings.svelte';
   import { ui } from '$lib/ui/state.svelte';
   import { menus } from '$lib/ui/order/Menu.svelte';
@@ -31,12 +31,32 @@
   const stop = () => stopAnswers().catch((err: Error) => (agent.error = `Could not turn off answers: ${err.message}`));
   /** The persistent conversation, only from a getliq that keeps one (0.8.0). */
   const conversation = $derived(companion.session ? agent.answerer?.session : undefined);
-  const autoTitle = $derived(conversation ? 'The conversation is summarised on its own once it holds about this many tokens; /compact does it now.' : SESSION_NEEDS);
+  const LEGACY = { off: null, '30k': 30_000, '60k': 60_000, '120k': 120_000 };
+  const SIZES = ['30k', '60k', '120k'] as const;
+  /** getliq 0.9.0 sends only one of its four sizes and takes nothing else. */
+  const anySize = $derived(conversation?.autoTokens !== undefined);
+  const autoTokens = $derived(conversation ? (conversation.autoTokens !== undefined ? conversation.autoTokens : LEGACY[conversation.auto]) : null);
+  const autoK = $derived(Math.round((autoTokens ?? 300_000) / 1000));
+  const autoMax = $derived(anySize ? Math.floor((conversation?.window ?? 1_000_000) / 1000) : 120);
+  const autoTitle = $derived(!conversation ? SESSION_NEEDS
+    : `The conversation is summarised on its own once it holds about this many thousand tokens; /compact does it now.${anySize ? (conversation.window ? ' The most is the context window of the model that answers.' : '') : ' This getliq takes 30, 60 or 120; update it for any size.'}`);
   const thousands = (tokens: number) => (tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens));
-  const autoCompact = (select: HTMLSelectElement) => setAutoCompact(select.value as AutoCompact).catch((err: Error) => {
-    select.value = conversation?.auto ?? 'off';
-    agent.error = `Could not change auto-compact: ${err.message}`;
-  });
+  let autoOn = $state<HTMLInputElement>();
+  let autoSize = $state<HTMLInputElement>();
+  /** Sends the field's size, or Off; a refused change puts both controls back. */
+  async function autoCompact() {
+    const [box, field] = [autoOn!, autoSize!];
+    const [on, typed] = [box.checked, field.value];
+    const k = Math.min(autoMax, Math.max(10, Math.round(Number(typed)) || autoK));
+    const size = anySize ? k * 1000 : SIZES.reduce((best, s) => (Math.abs(LEGACY[s] - k * 1000) < Math.abs(LEGACY[best] - k * 1000) ? s : best));
+    try {
+      await setAutoCompact(on ? size : 'off');
+      if (on && field.value === typed) field.value = String(typeof size === 'number' ? k : LEGACY[size] / 1000);
+    } catch (err) {
+      [box.checked, field.value] = [autoTokens !== null, String(autoK)];
+      agent.error = `Could not change auto-compact: ${(err as Error).message}`;
+    }
+  }
   const tap = (f: () => unknown) => (e: MouseEvent) => {
     (e.currentTarget as HTMLElement).blur();
     void f();
@@ -106,22 +126,35 @@
     {#if gearOpen}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="ui-menu settings" data-testid="ai-settings" role="group" aria-label="Co-pilot settings" tabindex="-1" onkeydown={popupKey} onfocusout={left} {@attach popup}>
+        <h5>Chart</h5>
         <div class="opts" title="Your AI can draw on the chart, publish guidance and suggest a ticket you send yourself. Nothing else; conversations stay in your AI client.">
           <label title="Shares this market, timeframe, public account address, visible indicators and hotkeys while this page is visible"><input type="checkbox" data-testid="ai-share-chart" checked={mentoring.shareChart} onchange={(e) => void setChartSharing(e.currentTarget.checked)} /> See my chart</label>
           <label title="Levels, zones and bias labels your AI draws. Click one to ask about it."><input type="checkbox" data-testid="ai-show-marks" bind:checked={settings.chart.indicators.ai.on} onchange={() => persist()} /> Draw on it</label>
           <label title="A browser notification when your AI publishes advice"><input type="checkbox" data-testid="ai-advice-notifications" checked={mentoring.notifications} onchange={(e) => setAdviceNotifications(e.currentTarget.checked)} /> Notify me</label>
         </div>
-        {#if agent.answerer}<p data-testid="ai-answerer"><span class="ok">Claude Code answers what you type here</span>{agent.answerer.answering.length ? ' · answering…' : ''} <button data-testid="ai-answerer-off" onclick={pick(stop)}>Turn off</button></p>
-          <p data-testid="ai-session" title={conversation ? 'Every question here and on the chart continues one Claude Code conversation kept on this computer. /clear starts a new one.' : SESSION_NEEDS}>{conversation ? `One conversation · ${conversation.turns} turn${conversation.turns === 1 ? '' : 's'} · ~${thousands(conversation.tokens)} tokens` : 'Each question is a separate run'}</p>
-          <label title={autoTitle}>Auto-compact
-            <select data-testid="ai-autocompact" title={autoTitle} disabled={!conversation} value={conversation?.auto ?? 'off'} onchange={(e) => void autoCompact(e.currentTarget)}>
-              <option value="off">Off</option><option value="30k">30k</option><option value="60k">60k</option><option value="120k">120k</option>
-            </select>
-          </label>
-          {#if conversation}<p class="dim" data-testid="ai-sources" title="Changed only in ~/.getliq/answerer.json on this computer">Data: getliq{conversation.web === 'off' ? '' : ' · web'}{conversation.sources.map((name) => ` · ${name}`).join('')}</p>{/if}
+        {#if agent.answerer}
+          <h5>Conversation</h5>
+          <span class="k">Answers</span>
+          <p data-testid="ai-answerer" title="Claude Code answers what you type here and on the chart"><span class="ok">Claude Code</span>{agent.answerer.answering.length ? ' · answering…' : ''} · <button data-testid="ai-answerer-off" onclick={pick(stop)}>Turn off</button></p>
+          <span class="k">Conversation</span>
+          <p data-testid="ai-session" title={conversation ? 'Every question here and on the chart continues one Claude Code conversation kept on this computer. /clear starts a new one.' : SESSION_NEEDS}>{conversation ? `${conversation.turns} turn${conversation.turns === 1 ? '' : 's'} · ~${thousands(conversation.tokens)} tokens` : 'Each question is a separate run'}</p>
+          <span class="k">Auto-compact</span>
+          <p class="auto" title={autoTitle}>
+            <input type="checkbox" data-testid="ai-autocompact-on" aria-label="Auto-compact" bind:this={autoOn} disabled={!conversation} checked={autoTokens !== null} onchange={() => void autoCompact()} />
+            <input type="number" inputmode="numeric" data-testid="ai-autocompact" aria-label="Auto-compact size in thousand tokens" title={autoTitle} bind:this={autoSize} min="10" max={autoMax} step="1" disabled={autoTokens === null} value={autoK} onchange={() => void autoCompact()} />
+            {#if conversation?.window}<span class="dim" data-testid="ai-autocompact-max">of {autoMax}k</span>{:else}<span>k</span>{/if}
+          </p>
+          {#if conversation}
+            <span class="k">Data</span>
+            <p data-testid="ai-sources" title="Changed only in ~/.getliq/answerer.json on this computer">getliq{conversation.web === 'off' ? '' : ' · web'}{conversation.sources.map((name) => ` · ${name}`).join('')}</p>
+          {/if}
         {/if}
-        <p class="dim">{companion.version ? `getliq ${companion.version} · ` : ''}{#if !terminalSessions().length}<span data-testid="ai-terminal-unavailable" title="Needs getliq 0.6.0 or later. Start your AI in Agent OS and ask it to report client_session with its session ID and terminal: true.">No terminal session yet.</span> · {/if}<button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={pick(openConnect)}>Connection…</button></p>
-        <p class="dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={pick(openCoach)}>Chart coach</button> · <button data-testid="ai-signout" onclick={pick(signOut)}>Sign out</button></p>
+        <h5>Connection</h5>
+        <span class="k">getliq</span>
+        <p>{companion.version ? `${companion.version} · ` : ''}<button data-testid="ai-open-connection" title="Which AI clients are connected and what they did" onclick={pick(openConnect)}>Connection…</button></p>
+        <span class="k">Terminal</span>
+        <p>{#if terminalSessions().length}{terminalSessions().length} session{terminalSessions().length === 1 ? '' : 's'}{:else}<span data-testid="ai-terminal-unavailable" title="Needs getliq 0.6.0 or later. Start your AI in Agent OS and ask it to report client_session with its session ID and terminal: true.">No session yet</span>{/if}</p>
+        <p class="foot dim"><button data-testid="ai-open-coach" title="Setups and live ideas beside price" onclick={pick(openCoach)}>Chart coach</button> · <button data-testid="ai-signout" onclick={pick(signOut)}>Sign out</button></p>
       </div>
     {/if}
     <AiThread />
@@ -168,7 +201,12 @@
 <style>
   .ai { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px 10px 10px; }
   .ai.paired { position: relative; }
-  .settings { position: absolute; z-index: 6; top: calc(1.5em + 22px); left: 10px; right: 10px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+  .settings { position: absolute; z-index: 6; top: calc(1.5em + 22px); left: 10px; right: 10px; max-height: min(60vh, calc(100% - 1.5em - 32px)); overflow-y: auto; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; gap: 6px 12px; padding: 10px; }
+  .settings > :is(h5, .opts, .foot) { grid-column: 1 / -1; }
+  .settings > p { overflow-wrap: anywhere; }
+  h5 { margin: 0; color: var(--bright); font: inherit; font-weight: 600; }
+  h5:not(:first-child), .foot { margin-top: 6px; }
+  .k { color: var(--dim); }
   .settings button { padding: 0; background: none; color: var(--accent); }
   .coach-link button, .card .dim button, .more { color: var(--accent); }
   .card .dim { position: relative; }
@@ -181,6 +219,8 @@
   .signin.alt { background: none; border: 1px solid var(--line); color: var(--accent); }
   label { display: flex; align-items: center; gap: 8px; }
   .opts { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+  .auto { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+  .auto input[type='number'] { width: 8ch; min-width: 0; appearance: textfield; }
   .err button { color: var(--accent); }
   .pair { display: flex; flex-direction: column; gap: 8px; }
   .pair label { flex-direction: column; align-items: stretch; gap: 4px; }

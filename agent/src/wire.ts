@@ -12,17 +12,20 @@ export type Suggestion = {
   id: string; coin: string; side: Side; kind: 'market' | 'limit'; px: number | null; size: number; unit: 'coin' | 'usd';
   tp: number | null; sl: number | null; reason: string; confidence: number; created: number; expires: number; status: Status; acted: number | null;
 };
-export type Mark = { id: string; coin: string; type: 'level' | 'zone' | 'bias'; a: number | null; b: number | null; label: string; tone?: 'neutral' | 'support' | 'resistance' | 'invalidation'; author?: 'user' | 'ai' | null; interval?: string | null; t0?: number | null; t1?: number | null; created: number; expires: number };
+export type Mark = { id: string; coin: string; type: 'level' | 'zone' | 'bias'; a: number | null; b: number | null; label: string; tone?: 'neutral' | 'support' | 'resistance' | 'invalidation'; reason?: string | null; notes?: string | null; author?: 'user' | 'ai' | null; interval?: string | null; t0?: number | null; t1?: number | null; created: number; expires: number };
 /** A file the user attached to a question, as the browser and the AI see it; the bytes stay in the database and are read with the attachment tool. */
 export type Attachment = { id: string; name: string; type: 'image/jpeg' | 'image/png' | 'text/plain'; size: number };
 export const ATTACHMENT_EXPIRED = 'attachment expired; attach again';
 const attachments = z.array(z.string().uuid()).min(1).max(4).optional();
-export type AnnotationChat = { mark: Mark; messages: { id: string; role: 'user' | 'assistant'; text: string; created: number; replyTo?: string; attachments?: Attachment[] }[]; updated: number };
+export type AnnotationChat = { mark: Mark; messages: { id: string; role: 'user' | 'assistant'; text: string; created: number; replyTo?: string; reasoning?: string; attachments?: Attachment[] }[]; updated: number };
 
 export const stage = z.enum(['unconscious-incompetence', 'conscious-incompetence', 'conscious-competence', 'unconscious-competence']);
 const annotationMessage = z.object({ markId: z.string().uuid(), message: z.string().trim().min(1).max(1000) }).strict();
 export const annotationQuestion = annotationMessage.extend({ attachments });
-export const annotationReply = annotationMessage.extend({ questionId: z.string().uuid() });
+export const annotationReply = annotationMessage.extend({
+  questionId: z.string().uuid(),
+  reasoning: z.string().trim().min(1).max(600).optional().describe('A short reasoning summary you choose to publish beside the reply: evidence → inference → what would invalidate it. Shown to the user and stored with the reply; never private chain-of-thought or a transcript')
+});
 export type AnnotationQuestion = z.infer<typeof annotationQuestion>;
 export type AnnotationReply = z.infer<typeof annotationReply>;
 const YEAR = 365 * 86_400_000;
@@ -60,10 +63,12 @@ export const userMarkInput = z.object({
   .refine((m) => (m.type === 'zone') === (m.b !== undefined), 'a zone needs b; a level must not have it')
   .refine((m) => m.t0 <= m.t1 && m.t0 > Date.now() - YEAR && m.t1 < Date.now() + 86_400_000, 't0..t1 must be a range within the last year');
 export type UserMarkInput = z.input<typeof userMarkInput>;
+export const modelName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$/);
 export const clientSession = z.object({
   client: z.enum(['codex', 'claude-code', 'other']),
   sessionId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional(),
   status: z.enum(['active', 'idle', 'ended']),
+  model: modelName.optional().describe('Actual model ID if known. Omit it when unverified.'),
   terminal: z.boolean().optional().describe('Allow this paired browser to send prompts to this session through Agent OS. Requires a resumable session ID and Agent OS running locally; false disables it.'),
   localUrl: z.string().max(200).refine((value) => {
     try {
@@ -74,7 +79,7 @@ export const clientSession = z.object({
   }).optional()
 }).strict();
 export type ClientSessionInput = z.infer<typeof clientSession>;
-export type ClientSession = ClientSessionInput & { at: number };
+export type ClientSession = ClientSessionInput & { at: number; mcpPid?: number };
 export const terminalInput = z.object({
   id: z.string().uuid(), client: z.enum(['codex', 'claude-code']), sessionId: z.string().regex(/^[a-zA-Z0-9-]{1,100}$/),
   message: z.string().trim().min(1).max(2000).regex(/^[^\u0000-\u0008\u000b-\u001f\u007f]*$/),
@@ -149,25 +154,32 @@ export const markInput = z.object({
   b: price.optional(),
   label: z.string().trim().min(1).max(60),
   tone: z.enum(['neutral', 'support', 'resistance', 'invalidation']).default('neutral'),
+  reason: z.string().trim().min(1).max(300).optional().describe('Why this level or zone, as a short reasoning summary shown to the user; never private chain-of-thought'),
+  notes: z.string().trim().min(1).max(300).optional().describe('Short extra notes shown to the user, such as what confirms or invalidates it'),
   expiresMin
 });
 export type SuggestInput = z.infer<typeof suggestInput>;
 export type MarkInput = z.infer<typeof markInput>;
 
+/** The sizes getliq 0.9.0 offered: still accepted from an older page, and what an older page is told. */
 export const AUTO_COMPACT = ['off', '30k', '60k', '120k'] as const;
 export type AutoCompact = (typeof AUTO_COMPACT)[number];
-/** All a browser may ask of the answerer: turn it off, queue a session command, or pick an auto-compact size. Never on, and never tools, web, sources, model or prompt. */
+export const AUTO_MIN = 10_000;
+/** The largest window Claude Code accepts; it caps it at the model's own. */
+export const AUTO_MAX = 1_000_000;
+export const AUTO_DEFAULT = 300_000;
+/** All a browser may ask of the answerer: turn it off, queue a session command, or set the auto-compact size ('off' or tokens). Never on, and never tools, web, sources, model or prompt. */
 export const answererInput = z.union([
   z.object({ on: z.literal(false) }).strict(),
   z.object({ command: z.enum(['compact', 'clear']) }).strict(),
-  z.object({ auto: z.enum(AUTO_COMPACT) }).strict()
+  z.object({ auto: z.union([z.enum(AUTO_COMPACT), z.number().int().min(AUTO_MIN).max(AUTO_MAX)]) }).strict()
 ]);
 
 const sourceTools = z.array(z.string().regex(/^(\*|[A-Za-z0-9_-]{1,64})$/)).min(1).max(32);
 const secrets = z.record(z.string().min(1).max(200), z.string().max(4000)).default({});
 /** ~/.getliq/answerer.json, written by hand in a terminal: the only way the answerer gets web access or the user's own MCP servers. Names carry no underscore, so mcp__<name>__ prefixes cannot collide. */
 export const answererConfig = z.object({
-  model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$/).optional(),
+  model: modelName.optional(),
   budget: z.number().min(0.1).max(50).default(2),
   web: z.union([z.boolean(), z.array(z.string().regex(/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/)).min(1).max(32)]).default(false),
   sources: z.record(z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).refine((name) => name !== 'getliq', 'getliq is reserved'), z.union([

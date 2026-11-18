@@ -6,7 +6,7 @@
   import { fmtPx } from '$lib/util/format';
   import { isTouch } from '$lib/ui/touch';
   import { drawings } from '$lib/ui/chart/drawings.svelte';
-  import AiMessage from './AiMessage.svelte';
+  import AiMessage, { detail, levelsIn, refers } from './AiMessage.svelte';
   import { load, save } from '$lib/util/storage';
   import { included, type SelectionContext } from '$lib/ui/chart/selection';
 
@@ -24,6 +24,13 @@
   const when = $derived(mark?.t0 ? `${mark.interval ?? ''} · ${time(mark.t0)}${mark.t1 && mark.t1 !== mark.t0 ? ` → ${time(mark.t1)}` : ''}` : '');
   let deleting = $state(false);
   const decimals = $derived(mark ? meta.byName.get(mark.coin)?.szDecimals : undefined);
+  const px = (n: number | null) => (n === null ? '' : fmtPx(n, decimals));
+  const own = (text: string) => [mark?.a, mark?.b, ...levelsIn(text)];
+  /** What else the AI published for this coin: advice with its evidence, and staged tickets with their reason. */
+  const related = $derived(!mark ? [] : [
+    ...agent.advice.filter((entry) => entry.coin === mark.coin).map((entry) => ({ key: `a:${entry.id}`, kind: 'advice', glyph: '✦', head: entry.skill, text: entry.advice, why: entry.evidence, levels: levelsIn(entry.advice, entry.evidence) })),
+    ...agent.suggestions.filter((s) => s.coin === mark.coin).map((s) => ({ key: `s:${s.id}`, kind: 'ticket', glyph: '▸', head: `${s.side === 'buy' ? 'Buy' : 'Sell'} ticket`, text: [s.kind === 'limit' ? `Limit ${px(s.px)}` : 'Market', s.tp !== null && `TP ${px(s.tp)}`, s.sl !== null && `SL ${px(s.sl)}`].filter(Boolean).join(' · '), why: s.reason, levels: [s.px, s.tp, s.sl] }))
+  ]);
   const pending = $derived(thread?.messages.filter((message) => message.role === 'user' && !thread.messages.some((reply) => reply.replyTo === message.id)) ?? []);
   const PROMPTS = ['What does this show?', 'What would invalidate it?', 'Where is my risk here?'];
   let now = $state(Date.now());
@@ -210,8 +217,29 @@
     {#if when}<small class="dim" data-testid="annotation-when">{when}</small>{/if}
     {#if includes}<small class="dim" data-testid="annotation-included">Included: {includes}</small>{/if}
     <div class="messages" aria-live="polite" role="log" aria-label="Annotation conversation">
+      {#if mark.reason}
+        {@const levels = own(mark.reason)}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <p class="ai-why" class:hit={refers(levels)} data-testid="annotation-reason" tabindex="0" title="A short summary the AI chose to publish, not its private reasoning" {@attach detail(() => levels)}>{mark.reason}</p>
+      {/if}
+      {#if mark.notes}
+        {@const levels = own(mark.notes)}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <p class="notes" class:hit={refers(levels)} data-testid="annotation-notes" tabindex="0" {@attach detail(() => levels)}>{mark.notes}</p>
+      {/if}
+      {#if related.length}
+        <div class="related" data-testid="annotation-related" role="group" aria-label="Related advice and tickets">
+          <small>Related</small>
+          {#each related as r (r.key)}
+            <details class:hit={refers(r.levels)} data-kind={r.kind} {@attach detail(() => r.levels)}>
+              <summary><span class="glyph" aria-hidden="true">{r.glyph}</span> <span class="head">{r.head}</span> {r.text}</summary>
+              <p class="ai-why">{r.why}</p>
+            </details>
+          {/each}
+        </div>
+      {/if}
       {#each thread?.messages ?? [] as message (message.id)}
-        <AiMessage at={message.created} ai={message.role === 'assistant'} text={message.text} />
+        <AiMessage at={message.created} ai={message.role === 'assistant'} text={message.text} reasoning={message.reasoning} />
       {:else}<p class="dim">{sel ? 'Ask your local AI about this selection. Nothing is saved until you send.' : 'Ask about the reasoning, confirmation, or invalidation for this annotation.'}</p>{/each}
     </div>
     {#if pending.length}
@@ -254,8 +282,18 @@
   header button { font-size: 22px; }
   strong { color: var(--bright); }
   p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+  .notes::before { content: 'Notes'; margin-right: 1ch; color: var(--dim); font-size: 0.85em; font-weight: 600; }
+  .related { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  summary { cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  [open] > summary { white-space: normal; overflow-wrap: anywhere; }
+  details p { padding-left: 2ch; }
+  .head { color: var(--bright); }
+  [data-kind='advice'] .glyph { color: var(--ai-advice); }
+  [data-kind='ticket'] .glyph { color: var(--ai-ticket); }
+  .hit, .hit .head { color: var(--accent); }
   .prices { color: var(--accent); font-family: var(--mono); font-weight: 600; }
-  .messages { display: grid; gap: 8px; max-height: 220px; overflow-y: auto; flex-shrink: 0; }
+  .messages { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 8px; min-height: 3lh; max-height: 300px; overflow-y: auto; flex-shrink: 1; }
+  .annotation-chat > :not(.messages) { flex-shrink: 0; }
   .quick button { color: var(--accent); }
   .waiting { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
   .waiting small { font-family: var(--mono); }

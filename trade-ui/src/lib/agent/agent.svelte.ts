@@ -16,12 +16,12 @@ export type Selection = Omit<UserMarkInput, 'message' | 'context'>;
 
 export type Advice = { id: string; kind: string; coin?: string; skill: string; stage?: string; evidence: string; advice: string; nextStep: string; created: number; expires: number };
 export type AutoCompact = 'off' | '30k' | '60k' | '120k';
-/** session (getliq 0.8.0): the one conversation every answer continues, what it may read, and what it did on its own or on command. */
-type Answerer = { on: true; answering: string[]; error?: string; session?: { since: number | null; turns: number; tokens: number; auto: AutoCompact; web: 'off' | 'any' | 'listed'; sources: string[]; notes: { id: string; at: number; kind: string; text: string }[] } };
+/** session (getliq 0.8.0): the one conversation every answer continues, what it may read, and what it did on its own or on command. autoTokens (null is off) and window, the answering model's once a run reported it, come from a getliq that takes any size; auto is all 0.9.0 sends. */
+type Answerer = { on: true; answering: string[]; error?: string; session?: { since: number | null; turns: number; tokens: number; auto: AutoCompact; autoTokens?: number | null; window?: number | null; model?: string | null; web: 'off' | 'any' | 'listed'; sources: string[]; notes: { id: string; at: number; kind: string; text: string }[] } };
 type State = { suggestions: Suggestion[]; marks: Mark[]; advice?: Advice[]; chats?: AnnotationChat[]; answerer?: Answerer; commands?: TerminalCommand[] };
 export type ToolCall = { id: number; at: number; tool: string; status: 'ok' | 'error'; durationMs: number };
 /** The local AI clients of this workspace, read every 15 s while signed in; `now` is the time of the last read, so ages and `askBlocked` move with it. */
-export const connection = $state({ sessions: [] as ClientSession[], calls: [] as ToolCall[], error: '', now: Date.now() });
+export const connection = $state({ sessions: [] as ClientSession[], calls: [] as ToolCall[], hubPid: null as number | null, error: '', now: Date.now() });
 export const annotationChat = $state({ markId: null as string | null, pending: null as Selection | null });
 const SHARE_KEY = 'trade-ui:share-chart', NOTIFY_KEY = 'trade-ui:advice-notifications';
 export const mentoring = $state({ shareChart: load(SHARE_KEY, false), notifications: load(NOTIFY_KEY, true) });
@@ -186,10 +186,13 @@ const safeUrl = (value: unknown) => {
       && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash;
   } catch { return false; }
 };
+const validModel = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$/.test(value);
+const validPid = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const validSession = (s: ClientSession) => s && ['codex', 'claude-code', 'other'].includes(s.client)
   && ['active', 'idle', 'ended'].includes(s.status) && Number.isFinite(s.at)
   && (s.sessionId === undefined || (typeof s.sessionId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(s.sessionId)))
-  && (s.localUrl === undefined || safeUrl(s.localUrl)) && (s.terminal === undefined || typeof s.terminal === 'boolean');
+  && (s.localUrl === undefined || safeUrl(s.localUrl)) && (s.terminal === undefined || typeof s.terminal === 'boolean')
+  && (s.mcpPid === undefined || validPid(s.mcpPid)) && (s.model === undefined || validModel(s.model));
 const isAttachment = (a: Attachment) => a && typeof a.id === 'string' && /^[0-9a-f-]{36}$/.test(a.id) && ['image/jpeg', 'image/png', 'text/plain'].includes(a.type)
   && Number.isFinite(a.size) && typeof a.name === 'string' && a.name.length <= 80;
 const attachmentsOk = (list: unknown) => list === undefined || (Array.isArray(list) && list.length <= 4 && list.every(isAttachment));
@@ -252,7 +255,7 @@ function nudgeConnection() {
 function watchConnection(address: string) {
   let cancelled = false;
   let pending = false;
-  Object.assign(connection, { sessions: [], calls: [], error: '', now: Date.now() });
+  Object.assign(connection, { sessions: [], calls: [], hubPid: null, error: '', now: Date.now() });
   connectionRead = async () => {
     if (pending || cancelled) return;
     connection.now = Date.now();
@@ -264,7 +267,7 @@ function watchConnection(address: string) {
       const data = await response.json();
       if (!Array.isArray(data.clientSessions) || data.clientSessions.length > 8 || !data.clientSessions.every(validSession)
         || !Array.isArray(data.toolActivity) || data.toolActivity.length > 30 || !data.toolActivity.every(validCall)) throw new Error('Invalid connection details received.');
-      if (!cancelled) Object.assign(connection, { sessions: data.clientSessions, calls: data.toolActivity, error: '', now: Date.now() });
+      if (!cancelled) Object.assign(connection, { sessions: data.clientSessions, calls: data.toolActivity, hubPid: validPid(data.hubPid) ? data.hubPid : null, error: '', now: Date.now() });
     } catch (e) {
       if (!cancelled) connection.error = (e as Error).message;
     } finally { pending = false; }
@@ -290,11 +293,12 @@ const isChat = (chat: AnnotationChat) => chat && typeof chat.mark?.id === 'strin
   && Array.isArray(chat.messages) && chat.messages.length <= 40
   && chat.messages.every((message) => message && typeof message.id === 'string' && ['user', 'assistant'].includes(message.role)
     && typeof message.text === 'string' && message.text.length <= 1000 && Number.isFinite(message.created)
-    && (message.replyTo === undefined || typeof message.replyTo === 'string') && attachmentsOk(message.attachments));
+    && (message.replyTo === undefined || typeof message.replyTo === 'string') && (message.reasoning === undefined || short(600)(message.reasoning)) && attachmentsOk(message.attachments));
 const finiteOrNull = (x: unknown) => x === null || Number.isFinite(x);
 const short = (max: number) => (x: unknown) => typeof x === 'string' && x.length <= max;
 const isSession = (s: NonNullable<Answerer['session']>) => !!s && finiteOrNull(s.since) && Number.isFinite(s.turns) && Number.isFinite(s.tokens)
-  && ['off', '30k', '60k', '120k'].includes(s.auto) && ['off', 'any', 'listed'].includes(s.web)
+  && ['off', '30k', '60k', '120k'].includes(s.auto) && [s.autoTokens, s.window].every((n) => n === undefined || finiteOrNull(n)) && ['off', 'any', 'listed'].includes(s.web)
+  && (s.model === undefined || s.model === null || validModel(s.model))
   && Array.isArray(s.sources) && s.sources.length <= 8 && s.sources.every(short(32))
   && Array.isArray(s.notes) && s.notes.length <= 20 && s.notes.every((n) => n && short(40)(n.id) && Number.isFinite(n.at) && short(20)(n.kind) && short(200)(n.text));
 const isAnswerer = (a: Answerer) => a?.on === true && Array.isArray(a.answering) && a.answering.length <= 6 && a.answering.every((id) => typeof id === 'string')
@@ -304,6 +308,7 @@ const isSuggestion = (s: Suggestion) => s && typeof s.id === 'string' && typeof 
   && [s.px, s.tp, s.sl].every(finiteOrNull) && (s.kind === 'market' || Number.isFinite(s.px))
   && Number.isFinite(s.confidence) && Number.isFinite(s.created) && Number.isFinite(s.expires) && typeof s.status === 'string';
 const isMark = (m: Mark) => m && typeof m.id === 'string' && typeof m.coin === 'string' && typeof m.label === 'string' && Number.isFinite(m.expires)
+  && [m.reason, m.notes].every((note) => note === undefined || note === null || short(300)(note))
   && (m.type === 'bias' || (['level', 'zone'].includes(m.type) && Number.isFinite(m.a) && (m.type === 'level' || Number.isFinite(m.b))));
 const isState = (s: unknown): s is State => Array.isArray((s as State)?.suggestions) && (s as State).suggestions.every(isSuggestion)
   && Array.isArray((s as State)?.marks) && (s as State).marks.every(isMark)
@@ -482,7 +487,7 @@ export function startAgent(): () => void {
     $effect(() => {
       const address = agent.address;
       if (address) return untrack(() => watchConnection(address));
-      untrack(() => Object.assign(connection, { sessions: [], calls: [], error: '' }));
+      untrack(() => Object.assign(connection, { sessions: [], calls: [], hubPid: null, error: '' }));
     });
   });
   const heartbeat = setInterval(() => void shareContext(), 15_000);
@@ -637,7 +642,7 @@ export async function stopAnswers() {
 
 /** /compact and /clear take their turn behind the questions already waiting; the result arrives as a note in the answerer's state. */
 export const sessionCommand = (command: 'compact' | 'clear') => call('answerer', post({ command }));
-export const setAutoCompact = (auto: AutoCompact) => call('answerer', post({ auto }));
+export const setAutoCompact = (auto: AutoCompact | number) => call('answerer', post({ auto }));
 
 export async function deleteMark(id: string) {
   await call('marks/' + encodeURIComponent(id), { method: 'DELETE' });

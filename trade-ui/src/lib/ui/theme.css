@@ -7,6 +7,7 @@
   --text: #c8d2d4; --bright: #e5edec; --dim: #9aa3a4; --faint: #9aa3a4;
   --buy: #50d2c1; --sell: #ed7088; --accent: #50d2c1; --warn: #f3c96b;
   --buy-text: var(--buy); --sell-text: var(--sell); --warn-text: var(--warn);
+  --ai-term: #7aa2f7; --ai-mark: #b39df3; --ai-ticket: #e8c468; --ai-advice: #f08f55; --ai-why: #86cdf5;
   --chart-up: #26a69a; --chart-down: #ef5350; --chart-axis: #b2b5be;
   --vol-up: #22ab9480; --vol-down: #f7525f80;
   --sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -30,12 +31,14 @@
   --text: #34332f; --bright: #171713; --dim: #5c584d; --faint: #666052;
   --buy: #06705c; --sell: #ad2e44; --accent: #06705c; --warn: #936000;
   --buy-text: #055c4c; --sell-text: #962537; --warn-text: #7a5000;
+  --ai-term: #2b55b8; --ai-mark: #6a3fc0; --ai-ticket: #8a5a00; --ai-advice: #a12a9a; --ai-why: #0f6a94;
   color-scheme: light;
 }
 :root[data-theme='bloomberg'] {
   --bg: #000000; --panel: #090909; --surface: #211a10; --line: #49351c; --gutter: #171109;
   --text: #ffc56e; --bright: #ffe2ae; --dim: #d6aa70; --faint: #ba986b;
   --buy: #6fdb91; --sell: #ff7373; --accent: #ff9f1a; --warn: #ffd34d;
+  --ai-mark: #c4adff; --ai-ticket: #5fd7ff; --ai-advice: #ff8ad8;
   --sans: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   --mono: var(--sans);
 }
@@ -71,6 +74,8 @@ select { appearance: none; padding-right: 26px; background-image: url("data:imag
 .card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
 .card > h4 { margin: 0; color: var(--bright); font-size: var(--fs); font-weight: 600; }
 .callout { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+.ai-why { color: var(--ai-why); font-style: italic; }
+.ai-why::before { content: 'Reasoning'; margin-right: 1ch; font-size: 0.85em; font-style: normal; font-weight: 600; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .buy { color: var(--buy-text); } .sell { color: var(--sell-text); } .dim { color: var(--dim); }
 table { width: 100%; border-collapse: collapse; }

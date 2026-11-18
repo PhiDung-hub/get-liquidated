@@ -19,8 +19,8 @@
   $effect(() => {
     void theme;
     if (!chart || !series) return;
-    chart.applyOptions({ layout: { background: { color: token('--panel') }, textColor: token('--dim') }, grid: { vertLines: { color: token('--line') }, horzLines: { color: token('--line') } } });
-    series.applyOptions({ upColor: token('--buy'), downColor: token('--sell'), wickUpColor: token('--buy'), wickDownColor: token('--sell') });
+    chart.applyOptions({ layout: { background: { color: token('--panel') }, textColor: token('--chart-axis'), fontFamily: token('--mono') }, grid: { vertLines: { color: token('--gutter') }, horzLines: { color: token('--gutter') } } });
+    series.applyOptions({ upColor: token('--chart-up'), downColor: token('--chart-down'), wickUpColor: token('--chart-up'), wickDownColor: token('--chart-down') });
   });
   $effect(() => {
     if (!chart || !series) return;

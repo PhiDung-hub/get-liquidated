@@ -31,7 +31,8 @@ jobs:
       - run: pnpm build
       - name: Manifest and archive
         run: |
-          node trade-ui/scripts/verify.mjs manifest trade-ui/build > manifest.json
+          node trade-ui/scripts/verify.mjs manifest trade-ui/build | cmp - trade-ui/build/manifest.json
+          cp trade-ui/build/manifest.json manifest.json
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C trade-ui -cf - build | gzip -n > build.tar.gz
           jq -r .version manifest.json
       - name: Attest

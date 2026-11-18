@@ -24,9 +24,15 @@
   let tab = $state<Tab>('all');
   let sub = $state('');
   let starredOnly = $state(false);
+  let pickerTop = $state<string>();
   let input: HTMLInputElement;
   let rows: HTMLDivElement;
   onMount(() => {
+    if (!compare && !document.querySelector('[data-testid="chart"].fullscreen')) {
+      const trigger = document.querySelector('[data-testid="market-summary"] [data-testid="market-button"]');
+      const bounds = trigger?.getBoundingClientRect();
+      if (bounds?.height) pickerTop = `${bounds.bottom + 8}px`;
+    }
     if (!isTouch()) input.focus();
     void loadNotes();
     return watchPickerPrices();
@@ -121,7 +127,7 @@
 </script>
 
 <div class="scrim" role="presentation" onclick={() => (ui.overlay = null)}></div>
-<div class="picker" role="dialog" aria-label={compare ? `Compare with ${market.coin}` : 'Markets'} data-mode={compare ? 'compare' : 'select'}>
+<div class="picker" role="dialog" aria-label={compare ? `Compare with ${market.coin}` : 'Markets'} data-mode={compare ? 'compare' : 'select'} style:--picker-top={pickerTop}>
   {#if compare}
     <div class="cmp" data-testid="compare-list">
       <span class="dim">Compare {market.coin} with ({compared().length}/{MAX_COMPARE})</span>
@@ -182,7 +188,7 @@
 
 <style>
   .scrim { position: fixed; inset: 0; background: #000b; z-index: 10; }
-  .picker { position: fixed; top: calc(var(--fs) * 4); left: 12px; width: min(920px, calc(100vw - 24px)); max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border: 1px solid var(--line); z-index: 11; padding: 8px; }
+  .picker { position: fixed; top: var(--picker-top, calc(var(--fs) * 4)); left: 12px; width: min(920px, calc(100vw - 24px)); max-height: min(80vh, calc(100dvh - var(--picker-top, var(--fs) * 4) - 8px)); display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border: 1px solid var(--line); z-index: 11; padding: 8px; }
   .picker > * { flex: none; }
   .search { display: flex; gap: 6px; margin-bottom: 6px; }
   .search input { flex: 1; min-width: 0; }

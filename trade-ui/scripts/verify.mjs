@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Checks that a deployed Get Liquidated site serves exactly the files of a build (see VERIFY.md).
-//   node scripts/verify.mjs manifest [build]             print the build's SHA-256 manifest as JSON
+//   node scripts/verify.mjs manifest [build]             print the build's SHA-256 manifest as JSON (the build writes it to build/manifest.json)
 //   node scripts/verify.mjs <site-url> [build|manifest]  compare every file the site serves against it
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -8,15 +8,21 @@ import { join, relative, sep } from 'node:path';
 
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 const walk = (dir) => readdirSync(dir).flatMap((n) => (statSync(join(dir, n)).isDirectory() ? walk(join(dir, n)) : [join(dir, n)]));
-// _headers configures Cloudflare and is never served, so it cannot be compared.
-const NOT_SERVED = new Set(['_headers']);
+// _headers configures Cloudflare and is never served; manifest.json cannot hold its own hash, so it is compared as a whole instead.
+const MANIFEST = 'manifest.json';
+const NOT_LISTED = new Set(['_headers', MANIFEST]);
+const print = (manifest) => `${JSON.stringify(manifest, null, 1)}\n`;
 
 function manifestOf(dir) {
-  const files = Object.fromEntries(walk(dir).map((f) => [relative(dir, f).split(sep).join('/'), f]).filter(([p]) => !NOT_SERVED.has(p)).sort(([a], [b]) => (a < b ? -1 : 1)).map(([p, f]) => [p, sha(readFileSync(f))]));
+  const files = Object.fromEntries(walk(dir).map((f) => [relative(dir, f).split(sep).join('/'), f]).filter(([p]) => !NOT_LISTED.has(p)).sort(([a], [b]) => (a < b ? -1 : 1)).map(([p, f]) => [p, sha(readFileSync(f))]));
   return { version: JSON.parse(readFileSync(join(dir, '_app/version.json'), 'utf8')).version, files };
 }
 
-const load = (src) => (statSync(src).isDirectory() ? manifestOf(src) : JSON.parse(readFileSync(src, 'utf8')));
+/** The manifest and the exact text the site must serve at /manifest.json. */
+function load(src) {
+  const text = statSync(src).isDirectory() ? print(manifestOf(src)) : readFileSync(src, 'utf8');
+  return { ...JSON.parse(text), text };
+}
 // Cloudflare serves x.html at /x and index.html at /, redirecting the .html spelling.
 const urlPath = (p) => (p === 'index.html' ? '/' : p.endsWith('.html') ? `/${p.slice(0, -5)}` : `/${p}`);
 
@@ -38,17 +44,19 @@ async function verify(site, want) {
     return false;
   }
   const paths = Object.keys(want.files);
-  const bad = [];
+  const digest = sha(want.text);
+  const served = await fetchHash(site, MANIFEST).catch((e) => ({ status: String(e) }));
+  const bad = served.hash === digest ? [] : [{ p: MANIFEST, ...served }];
   for (let i = 0; i < paths.length; i += 8) {
     const got = await Promise.all(paths.slice(i, i + 8).map(async (p) => ({ p, ...(await fetchHash(site, p).catch((e) => ({ status: String(e) }))) })));
     for (const g of got) if (g.hash !== want.files[g.p]) bad.push(g);
   }
-  for (const b of bad) console.error(`✗ ${b.p}: ${b.hash ? `sha256 ${b.hash} ≠ ${want.files[b.p]}` : `HTTP ${b.status}`}`);
-  console.log(bad.length ? `✗ ${bad.length} of ${paths.length} files differ from ${want.version}` : `✓ ${site} serves ${want.version}: all ${paths.length} files match byte for byte`);
+  for (const b of bad) console.error(`✗ ${b.p}: ${b.hash ? `sha256 ${b.hash} ≠ ${want.files[b.p] ?? digest}` : `HTTP ${b.status}`}`);
+  console.log(bad.length ? `✗ ${bad.length} of ${paths.length} files differ from ${want.version}` : `✓ ${site} serves ${want.version}: all ${paths.length} files match byte for byte, manifest.json sha256 ${digest}`);
   return !bad.length;
 }
 
 const [cmd, src = 'build'] = process.argv.slice(2);
-if (cmd === 'manifest') console.log(JSON.stringify(manifestOf(src), null, 1));
+if (cmd === 'manifest') process.stdout.write(print(manifestOf(src)));
 else if (/^https?:\/\//.test(cmd ?? '')) process.exitCode = (await verify(cmd, load(src))) ? 0 : 1;
 else (console.error('usage: node scripts/verify.mjs manifest [build] | <site-url> [build|manifest.json]'), (process.exitCode = 2));

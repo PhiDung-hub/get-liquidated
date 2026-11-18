@@ -44,7 +44,7 @@ function resetAccount() {
     pmRatio: 0, borrowRatio: 0, abstraction: '', rate: null, loaded: false, spotLoaded: false, unnamedAgent: null
   });
   resetOrders();
-  funding.list = [];
+  Object.assign(funding, { list: [], ready: false });
   ledger.entries = ledger.entries.filter((e) => e.state === 'pending' || e.state === 'unknown');
   ledger.moves = [];
   chases.list = chases.list.filter((c) => c.state !== 'stopped');
@@ -160,6 +160,7 @@ export function startAccountFeeds(): () => void {
         });
       untrack(() => {
         fills.seeded = false;
+        funding.ready = false;
         void seed();
         void reconcileAll();
       });

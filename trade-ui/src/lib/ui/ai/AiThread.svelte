@@ -9,6 +9,7 @@
   type Slash = (typeof COMMANDS)[number];
   const HELP = `${COMMANDS.map((c) => `/${c.name} ${c.description}`).join(' · ')}. Auto-compact is in ⚙.`;
   let attachSeq = 0;
+  export const choosePromptDestination = (target: string) => (composer.target = target);
   export const onDock = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files') && !!(e.target as Element | null)?.closest?.('.copilot');
 </script>
 
@@ -18,7 +19,7 @@
   import { meta } from '$lib/market/meta.svelte';
   import { isTouch } from '$lib/ui/touch';
   import { fmtPx } from '$lib/util/format';
-  import AiMessage from './AiMessage.svelte';
+  import AiMessage, { detail, levelsIn, refers } from './AiMessage.svelte';
   import SuggestionCard from './SuggestionCard.svelte';
 
   type Message = (typeof agent.chats)[number]['messages'][number];
@@ -252,18 +253,18 @@
 {#snippet chatRow(row: ChatRow)}
   <li>
     {#if anchors.has(row.key)}<button class="link" data-testid="ai-thread-anchor" title="Open this thread on the chart" onclick={() => (annotationChat.markId = row.mark.id)}>{anchor(row.mark)}</button>{/if}
-    <AiMessage at={row.at} ai={row.message.role !== 'user'} text={row.message.text}>{@render files(row.message.attachments)}</AiMessage>
+    <AiMessage at={row.at} ai={row.message.role !== 'user'} text={row.message.text} reasoning={row.message.reasoning}>{@render files(row.message.attachments)}</AiMessage>
   </li>
 {/snippet}
 
 {#snippet commandRow(command: Command)}
   <li data-testid="ai-terminal-command">
-    <AiMessage at={command.created} text={command.message}>
+    <AiMessage at={command.created} kind="term" text={command.message}>
       {@render files(command.attachments)}
       <small role="status" title={`${command.client} · ${command.sessionId}`}>{statuses[command.status]}</small>
       {#if command.error}<p class="err">{command.error}</p>{/if}
     </AiMessage>
-    {#if command.reply}<AiMessage at={command.updated} ai text={command.reply} testid="ai-terminal-reply" />{/if}
+    {#if command.reply}<AiMessage at={command.updated} ai kind="term" text={command.reply} testid="ai-terminal-reply" />{/if}
   </li>
 {/snippet}
 
@@ -272,16 +273,21 @@
     {#if row.kind === 'chat'}{@render chatRow(row)}
     {:else if row.kind === 'command'}{@render commandRow(row.command)}
     {:else if row.kind === 'system'}<li><AiMessage at={row.at} system text={row.text} /></li>
-    {:else if row.kind === 'ticket'}<li><SuggestionCard s={row.s} {now} /></li>
+    {:else if row.kind === 'ticket'}<li><AiMessage at={row.at} kind="ticket"><SuggestionCard s={row.s} {now} flat /></AiMessage></li>
     {:else if row.kind === 'mark'}
-      <li class="mark"><button class="link" data-testid="ai-discuss-mark" title="Open this mark's thread on the chart" onclick={() => (annotationChat.markId = row.mark.id)}><small>{row.mark.type}{row.mark.a !== null ? ` ${price(row.mark, row.mark.a)}` : ''}</small> {row.mark.label}</button></li>
+      {@const levels = [row.mark.a, row.mark.b]}
+      <li><AiMessage at={row.at} kind="mark"><button class="link mark" class:hit={refers(levels)} data-testid="ai-discuss-mark" title="Open this mark's thread on the chart" onclick={() => (annotationChat.markId = row.mark.id)} {@attach detail(() => levels)}><small>{row.mark.type}{row.mark.a !== null ? ` ${price(row.mark, row.mark.a)}` : ''}{row.mark.b !== null ? ` – ${price(row.mark, row.mark.b)}` : ''}</small> {row.mark.label}</button></AiMessage></li>
     {:else}
-      <li><article data-testid="ai-advice">
-        <strong>{row.entry.skill}</strong>
-        <p>{row.entry.advice}</p>
-        <p class="dim">Practice: {row.entry.nextStep}</p>
-        <details><summary>Evidence &amp; reasoning summary{row.entry.stage ? ` · ${row.entry.stage.replaceAll('-', ' ')}` : ''}</summary><p class="dim">{row.entry.evidence}</p></details>
-      </article></li>
+      {@const levels = levelsIn(row.entry.advice, row.entry.evidence)}
+      <li><AiMessage at={row.at} kind="advice">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="advice" class:hit={refers(levels)} data-testid="ai-advice" role="group" tabindex="0" aria-label={`Advice: ${row.entry.skill}`} {@attach detail(() => levels)}>
+          <strong>{row.entry.skill}</strong>{#if row.entry.stage}<small> · {row.entry.stage.replaceAll('-', ' ')}</small>{/if}
+          <p>{row.entry.advice}</p>
+          <p class="dim">Practice: {row.entry.nextStep}</p>
+          <p class="ai-why" title="Evidence and a reasoning summary the AI chose to publish, not its private reasoning">{row.entry.evidence}</p>
+        </div>
+      </AiMessage></li>
     {/if}
   {/each}
 </ol>
@@ -348,12 +354,13 @@
   p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   small { color: var(--dim); font-family: var(--mono); font-size: max(8px, calc(var(--fs) * 0.917)); overflow-wrap: anywhere; }
   .link { color: var(--accent); }
-  .mark .link { color: var(--text); }
-  .mark .link:hover { color: var(--bright); }
+  .mark { color: var(--text); }
+  .mark:hover { color: var(--bright); }
   .mark small { margin-right: 0.5ch; }
+  .mark.hit, .advice.hit strong { color: var(--accent); }
+  .advice { align-self: stretch; overflow-wrap: anywhere; }
+  .advice strong { color: var(--bright); font-weight: 600; }
   .link { padding: 0; background: none; text-align: left; }
-  article { align-self: stretch; border: 1px solid var(--surface); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
-  summary { cursor: pointer; color: var(--dim); margin-bottom: 8px; }
   form { position: sticky; bottom: -10px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-bottom: 10px; margin-bottom: -10px; background: var(--panel); }
   .files { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0; padding: 0; list-style: none; color: var(--dim); font-family: var(--mono); font-size: max(8px, calc(var(--fs) * 0.917)); }
   .files li { flex-direction: row; align-items: center; gap: 6px; }

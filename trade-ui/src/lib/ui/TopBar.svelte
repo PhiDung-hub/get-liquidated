@@ -62,10 +62,8 @@
   const live = $state<Record<string, Ctx>>({});
   // Keyed by the names, so a meta publish that keeps the same chips does not resubscribe them.
   const favKey = $derived(favs.join(','));
-  // Chip prices show above the 1380px breakpoint below and on an opened foldable, and zen hides the bar; elsewhere chip() falls back to meta.ctxs.
-  const wide = new MediaQuery('min-width: 1381px');
   $effect(() => {
-    const offs = (favKey && (wide.current || (phone.current && fold.current)) && !inZen() ? favKey.split(',') : []).map((coin) => socket.subscribe({ type: 'activeAssetCtx', coin }, safe('favourite ctx', (d) => (live[coin] = isSpot(coin) ? parseSpotCtx(d.ctx) : parseCtx(d.ctx)))));
+    const offs = (favKey && info && !inZen() ? favKey.split(',') : []).map((coin) => socket.subscribe({ type: 'activeAssetCtx', coin }, safe('favourite ctx', (d) => (live[coin] = isSpot(coin) ? parseSpotCtx(d.ctx) : parseCtx(d.ctx)))));
     return () => offs.forEach((off) => off());
   });
   function chip(coin: string) {
@@ -84,15 +82,10 @@
     const chips = document.querySelectorAll<HTMLElement>('[data-testid="fav-chip"]');
     (chips[Math.min(i, chips.length - 1)] ?? document.querySelector<HTMLElement>('[data-testid="quick-open"]'))?.focus();
   }
-  /** What CSS cannot decide: chip prices show only while every chip fits with them, a chip wrapped onto the clipped row is inert, and the account label, then its short address, go before the market name is cut. */
+  /** Hide prices when space is tight and make any chips clipped on the next row inert. */
   function fit(header: HTMLElement) {
     const run = () => {
       const nav = header.querySelector<HTMLElement>('.chips');
-      header.classList.remove('nolabel', 'noaddr');
-      const coin = header.querySelector<HTMLElement>('.coin')!;
-      const cut = () => coin.scrollWidth > coin.clientWidth;
-      if (cut()) header.classList.add('nolabel');
-      if (cut()) header.classList.add('noaddr');
       if (!nav) return;
       nav.classList.remove('bare');
       nav.style.maxWidth = '';
@@ -179,20 +172,24 @@
     {/if}
   </section>
 {:else}
-  <header class="desk" {@attach fit}>
-    <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
-      <Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾
-    </button>
-    {@render chipStrip()}
-    <div class="stat"><span class="dim">Mark</span><span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></div>
-    {#if !spot}<div class="fold oracle"><div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div></div>{/if}
-    <div class="stat"><span class="dim">24h</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{fmtPct(change)}</span></div>
-    {@render fundingStat()}
-    <div class="fold strip">{@render more()}</div>
-    <div class="right">
-      <Connection />
-      <ThemePicker value={settings.display.theme} onchange={id => { settings.display.theme = id; persist(); }} />
-      <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
+  <header class="desk">
+    <div class="desk-nav" {@attach fit}>
+      {@render chipStrip()}
+      <div class="right">
+        <Connection />
+        <ThemePicker value={settings.display.theme} onchange={id => { settings.display.theme = id; persist(); }} />
+        <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
+      </div>
+    </div>
+    <div class="market-summary" data-testid="market-summary">
+      <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
+        <Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾
+      </button>
+      <div class="stat"><span class="dim">Mark</span><span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></div>
+      {#if !spot}<div class="fold oracle"><div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div></div>{/if}
+      <div class="stat"><span class="dim">24h</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{fmtPct(change)}</span></div>
+      {@render fundingStat()}
+      <div class="fold strip">{@render more()}</div>
     </div>
   </header>
 {/if}
@@ -208,17 +205,19 @@
   .migration-suggestion { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .migration-suggestion > span { flex: 1 1 240px; }
   @media (max-width: 900px) { .migration-suggestion { flex-wrap: nowrap; padding: 4px 12px; } .migration-suggestion > span { flex: 1 1 auto; } }
-  header { display: flex; align-items: center; padding: calc(6px + env(safe-area-inset-top)) 12px 6px; border-bottom: 1px solid var(--line); overflow: clip; white-space: nowrap; }
-  /* Mark, 24h, funding and the right controls never give way. The folds take only the room left, oracle first, then the strip, then the chips; each drops whole items that do not fit onto a clipped second line. Then fit() drops the account label, then its short address, then the market name is cut. */
-  .desk > .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .desk > .stat, .fold .stat { margin-left: 20px; }
-  .fold, .desk > .chips { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
-  .fold::before, .desk > .chips::before { content: ''; }
+  header { border-bottom: 1px solid var(--line); overflow: clip; white-space: nowrap; }
+  .desk-nav, .market-summary, .bar { display: flex; align-items: center; }
+  .desk-nav { padding: calc(4px + env(safe-area-inset-top)) 12px 4px; border-bottom: 1px solid var(--line); }
+  .market-summary { padding: 4px 12px; background: var(--panel); }
+  .market-summary > .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .market-summary > .stat, .fold .stat { margin-left: 20px; }
+  .fold, .desk-nav > .chips { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
+  .fold::before, .desk-nav > .chips::before { content: ''; }
   .fold { display: flex; font-size: max(8px, calc(var(--fs) * 0.917)); height: 2lh; }
   .oracle { flex-grow: 1000000; }
   .strip { flex-grow: 1000; }
-  .desk > .chips { margin-left: 8px; height: calc(var(--fs) * 1.167 * 1.4 + 16px); overflow-clip-margin: 4px; }
-  .chips:global(.bare) .num, .desk:global(.nolabel) :global(.wallet .label), .desk:global(.noaddr) :global(.wallet .addr) { display: none; }
+  .desk-nav > .chips { height: calc(var(--fs) * 1.167 * 1.4 + 16px); overflow-clip-margin: 4px; }
+  .chips:global(.bare) .num { display: none; }
   .coin { font-weight: 600; font-size: calc(var(--fs) * 1.167); background: none; padding: 4px 0; color: var(--bright); }
   .stat { display: flex; flex-direction: column; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .funding-values { display: flex; align-items: baseline; gap: 5px; }
@@ -235,9 +234,6 @@
   .quick { background: none; color: var(--faint); padding: 4px; font-size: max(8px, calc(var(--fs) * 0.833)); margin-left: 6px; }
   .quick:hover { color: var(--warn); }
   .right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: auto; padding-left: 20px; }
-  @media (min-width: 901px) and (max-width: 1380px) {
-    .chip .num { display: none; }
-  }
   .bar { gap: 6px; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; overflow: visible; }
   .bar > :not(.chips, .spacer) { flex-shrink: 0; }
   .bar .logo { border-radius: var(--radius); }

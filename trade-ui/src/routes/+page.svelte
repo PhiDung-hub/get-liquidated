@@ -299,11 +299,10 @@
   }
 
   const CHART_MIN = 320, TOP_MIN = 320, BOTTOM_MIN = 140, SUMMARY_MIN = 140;
-  let gridW = $state(0), gridH = $state(0), vh = $state(0), bannerH = $state(0), quickH = $state(0);
+  let gridW = $state(0), gridH = $state(0), vh = $state(0), bannerH = $state(0);
   let sidebarH = $state(0), sidebarTradeH = $state(0), phoneH = $state(0);
   const quickCoins = $derived(topChips());
   const quickRow = $derived(!zen && quickCoins.length > 0);
-  const quickSpace = $derived(quickRow ? quickH + 1 : 0);
   const ticketH = $derived(180 + 33 * settings.display.fs);
   const portrait = new MediaQuery('max-aspect-ratio: 3/4');
   const tall = $derived(!phone.current && !zen && portrait.current && vh >= 1440 && (gridH + (banner ? bannerH : 0)) * 0.7 >= ticketH + Math.round(vh * 0.2));
@@ -318,10 +317,10 @@
     const [book, panel] = widths(l.book, l.panel);
     // Tall portrait stacks the book above the ticket in one column, so only that column's width is kept.
     const tallPanel = clamp(l.tallPanel || Math.round(gridW * 0.25), PANEL_MIN, cols);
-    const rows = gridH ? gridH - quickSpace - 2 - Math.max(TOP_MIN, ticketH) : Infinity;
+    const rows = gridH ? gridH - 2 - Math.max(TOP_MIN, ticketH) : Infinity;
     const tallMid = tall ? clamp(l.tallMid || Math.round(vh * 0.18), SUMMARY_MIN, rows - BOTTOM_MIN) : l.tallMid;
     const tallBottom = tall ? clamp(l.tallBottom || Math.round(vh * 0.2), BOTTOM_MIN, rows - tallMid) : l.tallBottom;
-    const bottom = clamp(l.bottom || Math.round(vh * 0.36), BOTTOM_MIN, gridH ? gridH - quickSpace - 1 - TOP_MIN : Infinity);
+    const bottom = clamp(l.bottom || Math.round(vh * 0.36), BOTTOM_MIN, gridH ? gridH - 1 - TOP_MIN : Infinity);
     const sidebarMin = Math.min(SUMMARY_MIN, sidebarH / 2);
     const sidebarTrade = sidebarH ? Math.floor(clamp(l.sidebarTrade || sidebarTradeH, sidebarMin, sidebarH - sidebarMin)) : l.sidebarTrade;
     const phoneReserve = phoneH < 400 ? 38 : Math.min(160, phoneH * 0.22);
@@ -337,8 +336,7 @@
   const zenOpen = $derived(settings.display.zenOpen);
   const shown = $derived({ book: !zen || zenOpen.book, panel: !zen || zenOpen.order, account: !zen || zenOpen.positions });
   const top = $derived(['chart', ...(shown.book ? ['book'] : []), ...(shown.panel ? ['panel'] : [])]);
-  const quickArea = $derived(quickRow ? `'${top.map(() => 'quick').join(' ')}' ` : '');
-  const areas = $derived(tall ? `'summary summary' ${quickRow ? `'quick quick' ` : ''}'chart book' 'chart panel' 'account account'` : quickArea + [top, ...(shown.account ? [top.map((a) => (a === 'panel' && !zen ? a : 'account'))] : [])].map((r) => `'${r.join(' ')}'`).join(' '));
+  const areas = $derived(tall ? "'summary summary' 'chart book' 'chart panel' 'account account'" : [top, ...(shown.account ? [top.map((a) => (a === 'panel' && !zen ? a : 'account'))] : [])].map((r) => `'${r.join(' ')}'`).join(' '));
   const panelW = $derived(tall ? (min.book && min.trade ? 28 : lay.tallPanel) : min.trade ? 28 : lay[K.panel]);
   const columns = $derived(tall ? `minmax(0, 1fr) ${panelW}px` : top.map((a, i) => (i === 0 ? 'minmax(0, 1fr)' : `${a === 'chart' ? 28 : a === 'book' ? (min.book ? 28 : lay[K.book]) : panelW}px`)).join(' '));
   let from = DEFAULTS.display.layout;
@@ -429,9 +427,8 @@
   {:else}
     <main
       class="grid" class:tall bind:clientWidth={gridW} bind:clientHeight={gridH}
-      style:grid-template-columns={columns} style:grid-template-rows={tall ? `${summaryH}px ${quickRow ? 'auto ' : ''}${min.book ? 'auto minmax(0, 1fr)' : 'minmax(120px, 1fr) minmax(0, auto)'} ${bottomH}px` : `${quickRow ? 'auto ' : ''}${shown.account ? `minmax(0, 1fr) ${bottomH}px` : 'minmax(0, 1fr)'}`} style:grid-template-areas={areas}
+      style:grid-template-columns={columns} style:grid-template-rows={tall ? `${summaryH}px ${min.book ? 'auto minmax(0, 1fr)' : 'minmax(120px, 1fr) minmax(0, auto)'} ${bottomH}px` : shown.account ? `minmax(0, 1fr) ${bottomH}px` : 'minmax(0, 1fr)'} style:grid-template-areas={areas}
     >
-      {#if quickRow}<section class="quick-markets" bind:clientHeight={quickH}><QuickMarkets coins={quickCoins} /></section>{/if}
       <section class="chart charts" class:multi={panes > 0} data-testid="charts">
         <div class="main" style:grid-row="1 / span {Math.max(1, panes)}"><Chart /></div>
         {#if panes}{#each settings.chart.panes as _, i (i)}<MiniChart index={i} />{/each}{/if}
@@ -456,7 +453,7 @@
       </section>
       <section class="account" class:shut={!shown.account}><AccountTabs /></section>
       {#if !zen}
-        {@const band = tall ? `top: ${summaryH + quickSpace + 1}px; bottom: ${bottomH + 1}px; ` : `top: ${quickSpace}px; `}
+        {@const band = tall ? `top: ${summaryH + 1}px; bottom: ${bottomH + 1}px; ` : 'top: 0; '}
         {#if !tall && !settings.display.minimized.book}<Divider axis="x" label="Resize order book" value={lay[K.book]} style="right: {lay[K.book] + panelW - 2}px; bottom: {bottomH + 1}px; {band}" start={begin} move={(d) => resize({ [K.book]: from[K.book] - d })} end={persist} reset={() => reset(K.book)} />{/if}
         {#if panelW > 28}<Divider axis="x" label="Resize order book and order panel" value={lay[K.panel]} style="{band}right: {panelW - 3}px" start={begin} move={tall ? (d) => resize({ tallPanel: from.tallPanel - d }) : split} end={persist} reset={() => reset(K.panel)} />{/if}
         {#if !settings.display.minimized.positions}<Divider axis="y" label="Resize account tabs" value={lay[K.bottom]} style="bottom: {lay[K.bottom] - 3}px; right: {tall ? 0 : panelW + 1}px" start={begin} move={(d) => resize({ [K.bottom]: from[K.bottom] - d })} end={persist} reset={() => reset(K.bottom)} />{/if}
@@ -505,7 +502,6 @@
   .charts { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(0, 1fr); gap: 1px; background: var(--line); }
   .charts.multi { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
   .charts .main { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
-  .quick-markets { grid-area: quick; overflow: hidden; }
   .book { grid-area: book; display: flex; flex-direction: column; }
   .panel { grid-area: panel; position: relative; display: flex; flex-direction: column; overflow: hidden; }
   .trade-section { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }

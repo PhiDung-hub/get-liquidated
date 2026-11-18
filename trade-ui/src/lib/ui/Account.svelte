@@ -1,12 +1,12 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { inventory, summary, usdValue } from '$lib/account/inventory.svelte';
+  import { fractionOfEquity, inventory, summary, usdValue } from '$lib/account/inventory.svelte';
   import { openOrders, type OpenOrder } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { meta } from '$lib/market/meta.svelte';
   import { fees } from '$lib/account/fees.svelte';
-  import { fmtNum, fmtUsd } from '$lib/util/format';
+  import { fmtNum, fmtUsd, fmtUsdShort } from '$lib/util/format';
   import Coin from './Coin.svelte';
   import IdleYield from './IdleYield.svelte';
 
@@ -17,6 +17,7 @@
   const pct = (n: number) => (loaded && Number.isFinite(n) ? `${fmtNum(n * 100, 2)}%` : '—');
   const lev = (n: number) => (loaded && Number.isFinite(n) ? `${fmtNum(n, 2)}×` : '—');
   const usdOf = (n: number) => (loaded ? fmtUsd(n) : '—');
+  const exposureOf = (n: number) => Number.isFinite(n) ? `${lev(fractionOfEquity(n, s.equity))} (${fmtUsdShort(n)})` : '—';
   type Row = { id: string; label: string; value: string; title?: string; pnl?: boolean };
   const upnl = $derived<Row>({ id: 'inv-upnl', label: 'Unrealized PnL', value: usdOf(s.uPnl), title: 'excl. funding & fees', pnl: true });
   const notionals = $derived.by(() => {
@@ -58,10 +59,9 @@
   const groups = $derived([
     { title: 'Balance', rows: rows.slice(0, rows.findIndex((r) => r.id === 'inv-ratio')) },
     { title: 'Margin', rows: rows.slice(rows.findIndex((r) => r.id === 'inv-ratio')) },
-    { title: 'Perp exposure', rows: [
-      { id: 'inv-gross-exposure', label: 'Gross exposure', value: usdOf(notionals.gross), title: 'Sum of absolute open perp position values' },
-      { id: 'inv-net-delta', label: 'Net delta', value: usdOf(notionals.delta), title: 'Long minus short perp exposure, in dollars' },
-      { id: 'inv-effective-leverage', label: 'Account Leverage', value: lev(s.equity > 0 ? notionals.gross / s.equity : NaN), title: 'Effective account leverage: gross perp exposure divided by total account equity' }
+    { title: 'Account Leverage', rows: [
+      { id: 'inv-gross-exposure', label: 'Gross exposure', value: exposureOf(notionals.gross), title: `Effective leverage: absolute open perp exposure (${usdOf(notionals.gross)}) divided by account equity (${usdOf(s.equity)}).` },
+      { id: 'inv-net-delta', label: 'Net delta', value: exposureOf(notionals.delta), title: `Long minus short perp exposure (${usdOf(notionals.delta)}) divided by account equity (${usdOf(s.equity)}).` }
     ] }
   ]);
   const whole = (n: number) => `$${fmtNum(n, 0)}`;

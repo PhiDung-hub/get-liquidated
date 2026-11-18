@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { dailyFunding, FUNDING_DAY_MS } from '$lib/account/funding.svelte';
-  import { inventory, liqDist, markOf as mark, type Position } from '$lib/account/inventory.svelte';
+  import { fractionOfEquity, inventory, liqDist, markOf as mark, summary, type Position } from '$lib/account/inventory.svelte';
   import { isTrailing, openOrders } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { listed, maintenance, meta } from '$lib/market/meta.svelte';
@@ -69,6 +69,8 @@
     return { pnl, margin, since, today, hourly };
   });
   const fundingAmount = (n: number | null) => n === null ? '—' : Math.abs(n) > 0 && Math.abs(n) < 0.01 ? `${n < 0 ? '-' : '+'}$${fmtNum(Math.abs(n), 4)}` : `${n > 0 ? '+' : ''}${fmtUsd(n)}`;
+  const equity = $derived(summary().equity);
+  const accountReturn = $derived(fractionOfEquity(totals?.pnl ?? NaN, equity));
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
   const priceTone = (p: Position) => {
     const move = (mark(p) - p.entryPx) * Math.sign(p.szi);
@@ -129,9 +131,9 @@
 {#snippet positionFunding(p: Position)}
   {@render fundingValue(-p.fundingSinceOpen, todayFunding ? todayFunding.get(p.coin) ?? 0 : null, hourlyFunding(p))}
 {/snippet}
-{#snippet roe(p: Position)}{Math.abs(p.roe * 100) >= 1000 ? `${p.roe < 0 ? '-' : '+'}${fmtCompact(Math.abs(p.roe * 100))}%` : fmtPct(p.roe)}{/snippet}
+{#snippet percentage(ratio: number)}{Math.abs(ratio * 100) >= 1000 ? `${ratio < 0 ? '-' : '+'}${fmtCompact(Math.abs(ratio * 100))}%` : fmtPct(ratio)}{/snippet}
 {#snippet pnl(p: Position)}
-  <span class="pnl"><span data-testid="position-pnl" title="{fmtUsd(p.uPnl)} ({fmtPct(p.roe)})">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render roe(p)}</span>)</span>
+  <span class="pnl"><span data-testid="position-pnl" data-help title="{fmtUsd(p.uPnl)} · {fmtPct(p.roe)} ROE · {fmtPct(fractionOfEquity(p.uPnl, equity))} of account equity">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render percentage(p.roe)}</span>)</span>
 {/snippet}
 {#snippet liq(p: Position)}{@const d = liqDist(p)}{p.liqPx ? fmtPx(p.liqPx, dec(p.coin)) : '—'}{#if p.liqPx && d !== '>1000%'}{' '}<span class="dim" data-testid="position-liq-distance">({p.liqPx < mark(p) ? '-' : '+'}{d})</span>{/if}{/snippet}
 {#snippet margin(p: Position, card = false)}
@@ -158,7 +160,9 @@
 {#snippet closeAll()}<button class="sweep" data-testid="flatten-open" onclick={(e) => sweepOf(e, 'flatten')}>Close All</button>{/snippet}
 
 {#snippet pnlTotal()}
-  <b class="sum num" class:buy={(totals?.pnl ?? 0) > 0} class:sell={(totals?.pnl ?? 0) < 0} data-testid="positions-total-pnl">{@render usd(totals?.pnl ?? NaN)}</b>
+  <b class="sum num" class:buy={(totals?.pnl ?? 0) > 0} class:sell={(totals?.pnl ?? 0) < 0} data-testid="positions-total-pnl">
+    {@render usd(totals?.pnl ?? NaN)} <span class="account-return" data-help title="Unrealized PnL as a share of account equity ({fmtUsd(equity)}): {fmtPct(accountReturn)}">({@render percentage(accountReturn)} acct)</span>
+  </b>
 {/snippet}
 {#snippet marginTotal()}<b class="sum num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b>{/snippet}
 {#snippet fundingTotal()}
@@ -294,6 +298,7 @@
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
   tfoot td { padding-block: 12px 6px; vertical-align: bottom; }
   .sum { position: relative; display: inline-block; padding-top: 5px; }
+  .account-return { white-space: nowrap; }
   .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
   .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }

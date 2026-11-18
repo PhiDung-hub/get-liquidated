@@ -98,6 +98,7 @@ export const freeOf = (token: string) => {
   return b ? b.total - (b.spotHold ?? b.hold) : 0;
 };
 export const markOf = (p: Position) => p.positionValue / Math.abs(p.szi);
+export const fractionOfEquity = (amount: number, equity: number) => Number.isFinite(equity) && equity > 0 ? amount / equity : NaN;
 export const liqDist = (p: Position) => {
   const d = p.liqPx ? Math.abs(p.liqPx - markOf(p)) / markOf(p) : NaN;
   return !Number.isFinite(d) ? '—' : d > 10 ? '>1000%' : `${(d * 100).toFixed(1)}%`;

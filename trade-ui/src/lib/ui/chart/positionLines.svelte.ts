@@ -128,16 +128,16 @@ function clusters(list: Label[], h: number, y: (t: Label) => number | null, held
   return out;
 }
 
-/** One tag for a run, on its order nearest the market whose whole tag fits the pane (fits(y)), else on the pane, with its side, count and price range; its rows top to bottom, inert until follow settles them, each with what its fill does to the position, filling the run from the market outward. */
+/** Anchor the tag at the nearest visible order and list the run in fill order, from the market outward. */
 function groupOf(run: Label[], coin: string, dec: number | undefined, fits: (y: number) => boolean): Group {
-  const rows = [...run].sort((a, b) => b.price - a.price);
-  const out = run[0].buy ? rows : [...rows].reverse();
-  const at = out.find((t) => fits(t.y)) ?? out.find((t) => t.y >= 0) ?? out[0];
+  const byFillPrice = (a: Line, b: Line) => run[0].buy ? b.price - a.price : a.price - b.price;
+  const rows = [...run].sort(byFillPrice);
+  const at = rows.find((t) => fits(t.y)) ?? rows.find((t) => t.y >= 0) ?? rows[0];
   const p = positionOf(coin);
   let position = p?.szi ?? 0;
   const projections = new Map<string, { position: number; filled: number; phase: Row['phase']; transition: string; pnl?: number }>();
   const fills = openOrders.list.filter((o) => o.coin === coin && !o.isTrigger && !isTrailing(o) && (o.side === 'B') === at.buy)
-    .map((o) => orderLine(o, p, dec)).sort((a, b) => at.buy ? b.price - a.price : a.price - b.price);
+    .map((o) => orderLine(o, p, dec)).sort(byFillPrice);
   for (const t of fills) {
     const direction = t.buy ? 1 : -1;
     const opposing = position * direction < 0;
@@ -152,7 +152,8 @@ function groupOf(run: Label[], coin: string, dec: number | undefined, fits: (y: 
     projections.set(t.key, { position, filled: quantity, phase, transition, pnl });
   }
   const spot = meta.byName.get(coin)?.spot;
-  const [lo, hi] = [rows.at(-1)!.price, rows[0].price].map((px) => fmtPx(px, dec, spot));
+  const first = rows[0].price, last = rows.at(-1)!.price;
+  const lo = fmtPx(Math.min(first, last), dec, spot), hi = fmtPx(Math.max(first, last), dec, spot);
   const text = `${at.buy ? 'Buy' : 'Sell'} ×${run.length} · ${lo === hi ? lo : `${lo}–${hi}`}`;
   const row = (t: Label): Row => {
     const projection = projections.get(t.key)!;

@@ -15,6 +15,7 @@
   import Coin from './Coin.svelte';
   import Connection from './Connection.svelte';
   import AccountSwitch from './AccountSwitch.svelte';
+  import ZenToggle from './ZenToggle.svelte';
   import { inZen } from './zen';
 
   let suggestMigration = $state(false);
@@ -190,6 +191,7 @@
       <div class="stat"><span class="dim">24h</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{fmtPct(change)}</span></div>
       {@render fundingStat()}
       <div class="fold strip">{@render more()}</div>
+      {#if !inZen() && !ui.chartFull}<ZenToggle />{/if}
     </div>
   </header>
 {/if}
@@ -211,6 +213,8 @@
   .market-summary { padding: 4px 12px; background: var(--panel); }
   .market-summary > .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .market-summary > .stat, .fold .stat { margin-left: 20px; }
+  .market-summary > :global(.zen-toggle) { margin-inline-start: auto; }
+  .market-summary > .strip { margin-inline-end: 12px; }
   .fold, .desk-nav > .chips { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
   .fold::before, .desk-nav > .chips::before { content: ''; }
   .fold { display: flex; font-size: max(8px, calc(var(--fs) * 0.917)); height: 2lh; }

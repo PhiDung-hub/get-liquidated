@@ -26,8 +26,8 @@
   import Menu from './order/Menu.svelte';
   import { cancelLine, lineLabels, positionLines, signed, toggleGroup } from './chart/positionLines.svelte';
   import { bindingsFor, keyLabel, type ActionId } from '$lib/hotkeys/keymap';
-  import { session } from '$lib/session/session.svelte';
-  import { inZen, setZen } from './zen';
+  import { inZen } from './zen';
+  import ZenToggle from './ZenToggle.svelte';
   import { chartTools, escapeChart, pickSelected } from './chart/tools.svelte';
   import { measure } from './chart/measure.svelte';
   import { armTool, clearDrawings, deleteSelected, drawings } from './chart/drawings.svelte';
@@ -191,7 +191,7 @@
   };
   const inlineIv = $derived(pinnedIntervals.slice(0, pinCapacity).includes(settings.chart.interval));
   function fitPinnedIntervals(toolbar: HTMLDivElement) {
-    void [pinnedIntervals, mobileIv.current, compact, fullscreen, session.master];
+    void [pinnedIntervals, mobileIv.current, compact, fullscreen, showZen];
     if (mobileIv.current) return;
     const measure = () => {
       const style = getComputedStyle(toolbar), gap = parseFloat(style.columnGap) || 0;
@@ -285,10 +285,11 @@
   let legend = $state<{ bar: Bar; vals: Record<string, string>; cols: Record<string, string>; focused: boolean }>();
   const loadCoach = () => import('./ai/ChartCoach.svelte').then((m) => m.default).catch(() => { coach.open = false; toast.error('Chart coach could not load. Reload the page and try again.'); return null; });
   const narrow = new MediaQuery('max-width: 900px');
+  const showZen = $derived(narrow.current || fullscreen || inZen());
   // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the view controls.
   const compact = $derived(chartWidth > 0 && chartWidth < 560);
   const inlineRanges = $derived(chartWidth >= Math.max(672, 48 * settings.display.fs));
-  const room = $derived(chartWidth - 6 * settings.display.fs - (fullscreen ? 64 : 0));
+  const room = $derived(chartWidth - (showZen ? 6 * settings.display.fs : 0) - (fullscreen ? 64 : 0));
   const blocked = $derived(askBlocked());
   const toggleTool = (t: Parameters<typeof armTool>[0]) => (drawings.tool === t ? escapeChart() : armTool(t));
   type RailItem = { id: string; d: string; label: string; title: string; on?: boolean; off?: boolean; act: () => unknown; sep?: boolean };
@@ -1218,7 +1219,7 @@
       <button data-testid="chart-indicators" aria-haspopup="dialog" aria-expanded={ui.overlay === 'indicators'} aria-label={compact && room < 19.3 * settings.display.fs ? 'Indicators' : null} title="Indicators ({keys('indicators')})" onclick={(e) => (e.currentTarget.blur(), toggleIndicators())}>{compact && room < 19.3 * settings.display.fs ? 'ƒx' : 'ƒx Indicators'}</button>
       <button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>
     </span>
-    <button class="ui-tab zen-toggle" class:on={inZen()} aria-pressed={inZen()} disabled={!session.master} data-testid="zen-toggle" title={session.master ? `Chart-only view (${keys('zen')}, Esc exits)` : 'Connect a wallet to use Zen Mode'} onclick={(e) => { if (e.detail) e.currentTarget.blur(); setZen(!inZen()); }}>Zen Mode</button>
+    {#if showZen}<ZenToggle />{/if}
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
   <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
@@ -1387,7 +1388,7 @@
   .chart-refresh button:hover { color: var(--bright); }
   .chart-footer button { background: var(--panel); color: var(--dim); }
   .chart-coin { flex: none; padding: 4px 6px; color: var(--bright); font-weight: 600; white-space: nowrap; }
-  .zen-toggle { flex: none; display: inline-flex; align-items: center; white-space: nowrap; margin-inline-start: 8px; padding: 4px 6px; }
+  .intervals > :global(.zen-toggle) { margin-inline-start: 8px; }
   .chart-footer button.on { color: var(--accent); }
   .scales { position: relative; display: inline-flex; align-items: center; gap: inherit; }
   .scales > button { display: inline-flex; align-items: center; }

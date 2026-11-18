@@ -29,7 +29,7 @@
     suggestMigration = false;
     save('trade-ui:migration-suggested', true);
   }
-  let now = $state(Date.now());
+  let now = $state(0);
 
   const ctx = $derived(market.ctx ?? meta.ctxs.get(market.coin) ?? null);
   const szDec = $derived(meta.byName.get(market.coin)?.szDecimals ?? 0);
@@ -146,7 +146,7 @@
 {/snippet}
 {#snippet fundingStat()}
 {#if !spot}
-<div class="stat" title={fundingHelp}><span class="dim">Funding</span><span class="funding-values"><span class="num" data-testid="funding" class:buy={(ctx?.funding ?? 0) >= 0} class:sell={(ctx?.funding ?? 0) < 0}>{ctx?.funding != null ? `${fmtNum(ctx.funding * 100, 4)}%` : '—'}</span><span class="dim">in</span><time class="num" data-testid="funding-countdown" datetime={`PT${fundingSeconds}S`} aria-label={`${countdown} until next funding settlement`}>{countdown}</time></span></div>
+<div class="stat" title={fundingHelp}><span class="dim">Funding</span><span class="funding-values"><span class="num" data-testid="funding" class:buy={(ctx?.funding ?? 0) >= 0} class:sell={(ctx?.funding ?? 0) < 0}>{ctx?.funding != null ? `${fmtNum(ctx.funding * 100, 4)}%` : '—'}</span><span class="dim">in</span><time class="num" data-testid="funding-countdown" datetime={now ? `PT${fundingSeconds}S` : null} aria-label={now ? `${countdown} until next funding settlement` : null}>{now ? countdown : "—"}</time></span></div>
 {/if}
 {/snippet}
 

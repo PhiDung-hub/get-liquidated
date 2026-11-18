@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
@@ -22,6 +22,22 @@ const version = (process.env.TRADE_UI_VERSION ??= (() => {
   }
 })());
 
+const staticAdapter = adapter();
+const stableStatic = {
+  ...staticAdapter,
+  /** @param {import('@sveltejs/kit').Builder} builder */
+  async adapt(builder) {
+    await staticAdapter.adapt(builder);
+    const path = new URL('./build/index.html', import.meta.url);
+    const html = readFileSync(path, 'utf8');
+    // The chunk traversal order can differ between builds. Keep the entry and route links in place.
+    const chunks = /<link href="\/_app\/immutable\/chunks\/[^"]+" rel="modulepreload">/g;
+    const ordered = (html.match(chunks) ?? []).sort();
+    let index = 0;
+    writeFileSync(path, html.replace(chunks, () => ordered[index++]));
+  }
+};
+
 const GETLIQ = process.env.VITE_GETLIQ_PORT ?? '28657';
 const HL = ['https://api.hyperliquid.xyz', 'wss://api.hyperliquid.xyz', 'https://api.hyperliquid-testnet.xyz', 'wss://api.hyperliquid-testnet.xyz'];
 
@@ -29,7 +45,9 @@ const HL = ['https://api.hyperliquid.xyz', 'wss://api.hyperliquid.xyz', 'https:/
 export default {
   preprocess: vitePreprocess(),
   kit: {
-    adapter: adapter({ fallback: 'index.html' }),
+    adapter: stableStatic,
+    paths: { relative: false },
+    inlineStyleThreshold: 140_000,
     version: { name: version },
     csp: {
       mode: 'hash',

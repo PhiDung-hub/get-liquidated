@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { onMount, untrack, type Component } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { rateLimited, socket } from '$lib/transport/ws.svelte';
@@ -86,7 +87,7 @@
     const blob = takeLinkFragment();
     if (blob) showLink(blob);
   }
-  takeLink();
+  if (browser) takeLink();
   restoreMeta();
   restoreCoin(false);
 
@@ -159,7 +160,9 @@
     };
   }
 
+  let interactive = $state(false);
   onMount(() => {
+    interactive = true;
     socket.connect();
     const stops = [startMarketFeeds(), startAccountFeeds(), startHotkeys(), startArmWatch(), startExtremes(), startAgent(), startRecheck(), trackKeyboard()];
     initSession().catch((e) => toast.error(e.message)).finally(() => { if (!viewAddress()) listsDue = true; });
@@ -167,7 +170,12 @@
     const wake = () => { if (!document.hidden) socket.wake(); };
     document.addEventListener('visibilitychange', wake);
     addEventListener('online', wake);
-    const warm = setTimeout(() => Object.values(lazy).forEach((f) => f(true).catch(() => {})), 3000);
+    const warm = setTimeout(() => {
+      for (const [name, load] of Object.entries(lazy)) {
+        if (name === 'linkScan' && !phone.current && !session.linked) continue;
+        load(true).catch(() => {});
+      }
+    }, 3000);
     const noPinch = (e: Event) => { if (cards.current) e.preventDefault(); };
     document.addEventListener('gesturestart', noPinch);
     const guard = (e: BeforeUnloadEvent) => chases.list.some((c) => c.state !== 'stopped') && e.preventDefault();
@@ -369,7 +377,7 @@
 
 <svelte:window onhashchange={takeLink} onkeydown={tabStops} onpointerdowncapture={notePress} bind:innerHeight={vh} />
 
-<div class="app" class:zen class:banner data-zen={zen} data-testid="app" style:--toast-bottom={tall ? `${Math.max(0, gridH - summaryH) + 32 + 3 * settings.display.fs}px` : null} style:--toast-top={tall ? '8px' : null}>
+<div class="app" inert={!interactive} class:zen class:banner data-zen={zen} data-testid="app" style:--toast-bottom={tall ? `${Math.max(0, gridH - summaryH) + 32 + 3 * settings.display.fs}px` : null} style:--toast-top={tall ? '8px' : null}>
   <div class="topbar"><TopBar /></div>
   {#if banner}
     <p class="hip3" data-testid="hip3-banner" bind:offsetHeight={bannerH}>

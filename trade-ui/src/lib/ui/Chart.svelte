@@ -57,7 +57,7 @@
   const keyed = (id: ActionId, rest: string) => (bindingsFor(id).length ? `${keys(id)}; ${rest}` : rest);
   const TOOLS = [['h', 'M2 9h5.5m3 0H16M7.5 9a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0', 'Horizontal line', 'drawH'], ['v', 'M9 2v5.5m0 3V16M9 7.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 1 0 0-3', 'Vertical line', 'drawV'], ['trend', 'M4.1 13.9 13.9 4.1M1.5 15a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0M13.5 3a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0', 'Trend line', 'drawTrend'], ['fib', 'M2 3h14M2 7h9M2 11h11M2 15h14', 'Fib retracement', 'drawFib']] as const;
   const commonZones = ['UTC', 'Asia/Singapore', 'Asia/Ho_Chi_Minh', 'Asia/Tokyo', 'Europe/London', 'America/New_York'];
-  let now = $state(Date.now());
+  let now = $state(0);
   let localZone = $state('UTC');
   let allZones = $state<string[]>([]);
   const timezone = $derived(settings.chart.timezone === 'local' ? localZone : settings.chart.timezone);
@@ -86,7 +86,7 @@
   let el: HTMLDivElement;
   // lightweight-charts has no maximum axis width and a label's width depends on the pane height, so floor both axes at a computed width no label reaches.
   // The right axis is one width across all panes, so a visible study's labels count too.
-  const ruler = document.createElement('canvas');
+  let ruler: HTMLCanvasElement | undefined;
   let pinned = '';
   const studyLabels = () => [...new Set(insts.flatMap((k) => k.study.hidden ? [] : k.def.percent ? ['-0.0000%'] : k.def.flow || k.def.key === 'obv' ? ['-00.000M'] : k.def.pane === 'own' && !k.def.range ? ['-0000.00'] : []))];
   const pinAxes = (c: IChartApi) => {
@@ -99,7 +99,7 @@
     const key = `${font}|${family}|${right}`;
     if (pinned === key) return;
     pinned = key;
-    const ctx = ruler.getContext('2d')!;
+    const ctx = (ruler ??= document.createElement('canvas')).getContext('2d')!;
     ctx.font = `${font}px ${family}`;
     const width = (labels: string[]) => { const w = Math.ceil(11 + font * 5 / 6 + Math.max(...labels.map((l) => ctx.measureText(l).width))); return w + w % 2; };
     c.priceScale('right').applyOptions({ minimumWidth: width(right) });
@@ -1313,7 +1313,7 @@
       <button data-testid="chart-goto" aria-label="Go to date" title="Go to a date or range" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'goto'))}><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1" /><path d="M2 6.5h12M5 1.5v3M11 1.5v3" /></svg></button>
     </div>
     <span class="funding" data-testid="chart-funding" aria-hidden="true"></span>
-    <label class="timezone"><time data-testid="chart-clock" datetime={new Date(now).toISOString()}>{zoneFormats.clock.format(now)} ({clockOffset})</time><span aria-hidden="true">⌄</span><select aria-label="Chart timezone" data-testid="chart-timezone" value={settings.chart.timezone} onchange={(e) => { settings.chart.timezone = e.currentTarget.value; persist(); e.currentTarget.blur(); }}>
+    <label class="timezone"><time data-testid="chart-clock" datetime={now ? new Date(now).toISOString() : null}>{#if now}{zoneFormats.clock.format(now)} ({clockOffset}){:else}—{/if}</time><span aria-hidden="true">⌄</span><select aria-label="Chart timezone" data-testid="chart-timezone" value={settings.chart.timezone} onchange={(e) => { settings.chart.timezone = e.currentTarget.value; persist(); e.currentTarget.blur(); }}>
       <option value="local">Local ({localZone.replaceAll('_', ' ')})</option>
       <optgroup label="Common regions">{#each commonZones as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>
       <optgroup label="All regions">{#each [...new Set([...allZones, settings.chart.timezone])].filter((zone) => zone !== 'local' && !commonZones.includes(zone)).sort() as zone}<option value={zone}>{zone.replaceAll('_', ' ')}</option>{/each}</optgroup>

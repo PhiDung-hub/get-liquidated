@@ -48,7 +48,7 @@
     }
     if (!frame) frame = requestAnimationFrame(() => { shown = pending; frame = 0; });
   });
-  onDestroy(() => cancelAnimationFrame(frame));
+  onDestroy(() => { if (frame) cancelAnimationFrame(frame); });
   const asks = $derived(withTotals(shown.asks).reverse());
   const bids = $derived(withTotals(shown.bids));
   const amount = (level: (typeof bids)[number], cumulative = false) => quoteSize ? Number((cumulative ? level.notional : level.px * level.sz).toFixed(isSpot(market.coin) ? 8 : 6)) : cumulative ? level.total : level.sz;

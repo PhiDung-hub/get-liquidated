@@ -3,6 +3,8 @@ import { ALL_INTERVALS, INTERVALS, type Interval } from '$lib/market/candles';
 import { FS_RANGE, SETTINGS_KEY, THEMES, type ThemeId } from './themes';
 import { DEFAULT_STUDIES, DEFS, OLD, fromIndicators, validStudies, type Study } from '$lib/market/studies';
 
+export const MAX_QUICK = 10;
+
 export type SizeUnit = 'coin' | 'usd' | 'pct';
 /** A coin size names its coin, so a hotkey never sends it on another market. */
 export interface Sizing { value: number; unit: SizeUnit; basis: 'balance' | 'position'; coin?: string }
@@ -91,12 +93,16 @@ export function validTimezone(value: unknown): value is string {
   catch { return false; }
 }
 
+function validPins(raw: unknown[], limit: number) {
+  return [...new Set(raw.filter((coin): coin is string => typeof coin === 'string' && coin.length > 0 && coin.length <= 100))].slice(0, limit);
+}
+
 /** Keep a stored leaf only when it has the default's type (and an allowed value for enums); records (bindings) pass through when shaped right. */
 function merge(def: any, raw: any, path: string, warn: string[]): any {
   if (raw === undefined) return clone(def);
   if (path === 'superstars') {
     if (!Array.isArray(raw)) return warn.push('superstars: expected a list'), clone(def);
-    return [...new Set(raw.filter((coin) => typeof coin === 'string' && coin.length > 0 && coin.length <= 100))].slice(0, 5);
+    return validPins(raw, MAX_QUICK);
   }
   if (path === 'chart.studies') return validStudies(raw, warn) ?? clone(def);
   if (path === 'chart.pinnedIntervals' || path === 'chart.desktopPinnedIntervals') {
@@ -189,7 +195,7 @@ function fromIndicatorKeys(raw: any): any {
 function splitBar(raw: any) {
   if (!raw || typeof raw !== 'object' || raw.barSplit !== undefined) return raw;
   const list = (v: unknown) => (Array.isArray(v) ? v : []);
-  return { ...raw, barSplit: true, superstars: [...new Set([...list(raw.superstars), ...list(raw.favourites ?? DEFAULTS.favourites)])] };
+  return { ...raw, barSplit: true, superstars: validPins([...list(raw.superstars), ...list(raw.favourites ?? DEFAULTS.favourites)], 5) };
 }
 const upgrade = (raw: any) => splitBar(fromIndicatorKeys(fromPresets(raw)));
 

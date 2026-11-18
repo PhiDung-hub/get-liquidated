@@ -2,7 +2,7 @@
 
 The source of the trade screen served at **https://get.hyperliqui.date**: a static Svelte 5 app that talks to Hyperliquid straight from your browser.
 
-The 39-second demo uses simulated data to show scale orders, net and gross perp exposure, and unrealized PnL as a share of account equity. [Watch the product demo (MP4)](media/get-liquidated-demo.mp4).
+The 22-second demo uses simulated data to show Quick Switch, account exposure and leverage, and the Positions footer on desktop and mobile. [Watch the product demo (MP4)](media/get-liquidated-demo.mp4).
 
 You never paste a key into it. **Enable trading** creates a Hyperliquid agent (API) key inside your browser, your wallet approves it with an expiry, and it stays in this site's local storage. Orders leave signed for `api.hyperliquid.xyz`; the key itself never does. Withdrawals and transfers need your own wallet's signature, which an agent key cannot give. **Link phone** makes a separate key for the phone, encrypts it with your PIN (PBKDF2, AES-GCM) and carries it in the link's `#` fragment, which browsers never send to a server.
 

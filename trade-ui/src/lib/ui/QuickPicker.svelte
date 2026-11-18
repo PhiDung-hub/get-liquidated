@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { meta, nameOf, symOf } from '$lib/market/meta.svelte';
   import { selectCoin } from '$lib/market/market.svelte';
-  import { MAX_QUICK, addQuick, moveQuick, removeQuick, topChips } from '$lib/market/views.svelte';
+  import { MAX_QUICK, settings } from '$lib/settings/settings.svelte';
+  import { addQuick, moveQuick, removeQuick, topChips } from '$lib/market/views.svelte';
   import { ui } from './state.svelte';
   import Coin from './Coin.svelte';
   import { isTouch } from './touch';
@@ -43,7 +44,7 @@
 <div class="scrim" role="presentation" onclick={() => (ui.overlay = null)}></div>
 <div class="ui-menu quick" role="dialog" aria-label="Quick-switch markets" data-testid="quick-picker" style:--left="{left}px">
   <div class="head">
-    <span><span class="stars">★★</span> Quick switch <span class="dim" data-testid="quick-slots">{bar.length}/{MAX_QUICK}</span></span>
+    <span><span class="stars">★★</span> Quick switch <span class="dim" data-testid="quick-slots">{settings.superstars.length}/{MAX_QUICK}</span></span>
     <button class="x" aria-label="Close" onclick={() => (ui.overlay = null)}>✕</button>
   </div>
   <ol>
@@ -59,7 +60,7 @@
       <li class="dim">No quick-switch markets yet.</li>
     {/each}
   </ol>
-  <input bind:this={input} bind:value={q} onkeydown={(e) => e.key === 'Enter' && found[0] && add(found[0])} placeholder={bar.length >= MAX_QUICK ? 'Full: remove one to add' : 'Add a market'} aria-label="Add a quick-switch market" data-testid="quick-input" />
+  <input bind:this={input} bind:value={q} onkeydown={(e) => e.key === 'Enter' && found[0] && add(found[0])} placeholder={settings.superstars.length >= MAX_QUICK ? 'Full: remove one to add' : 'Add a market'} aria-label="Add a quick-switch market" data-testid="quick-input" />
   {#each found as c (c)}
     <button class="found" data-testid="quick-found" data-coin={c} onclick={() => add(c)}><Coin coin={c} /><span class="dim">+ add</span></button>
   {/each}

@@ -45,10 +45,9 @@
     settings.display.phoneTab = 'account';
     persist();
   }
-  // An opened foldable (a phone layout at 600 px or more) has room for each chip's price and 24h, so it shows every chip, scrolling.
   const fold = new MediaQuery('min-width: 600px');
   const info = $derived(!phone.current || fold.current);
-  const favs = $derived(topChips().slice(0, info ? undefined : 3));
+  const favs = $derived(topChips());
   const live = $state<Record<string, Ctx>>({});
   // Keyed by the names, so a meta publish that keeps the same chips does not resubscribe them.
   const favKey = $derived(favs.join(','));
@@ -72,49 +71,55 @@
     const chips = document.querySelectorAll<HTMLElement>('[data-testid="fav-chip"]');
     (chips[Math.min(i, chips.length - 1)] ?? document.querySelector<HTMLElement>('[data-testid="quick-open"]'))?.focus();
   }
-  /** Hide prices when space is tight and make any chips clipped on the next row inert. */
-  function fit(header: HTMLElement) {
-    const run = () => {
-      const nav = header.querySelector<HTMLElement>('.chips');
-      if (!nav) return;
-      nav.classList.remove('bare');
-      nav.style.maxWidth = '';
-      const box = nav.getBoundingClientRect();
-      const chips = [...nav.children] as HTMLElement[];
-      const shown = (c: HTMLElement) => c.getBoundingClientRect().bottom <= box.bottom + 0.5;
-      if (!chips.every(shown)) nav.classList.add('bare');
-      for (const c of chips) c.inert = !shown(c);
-      // The room a dropped chip leaves goes to the right controls' margin, not a gap inside the strip.
-      nav.style.maxWidth = `${(chips.filter(shown).at(-1)?.getBoundingClientRect().right ?? box.left) - box.left}px`;
+  let strip = $state<HTMLElement>();
+  let overflow = $state(false);
+  let atStart = $state(true);
+  let atEnd = $state(true);
+
+  function measure(viewport: HTMLElement) {
+    const track = viewport.firstElementChild!;
+    const update = () => {
+      overflow = track.getBoundingClientRect().width > viewport.parentElement!.clientWidth + 1;
+      atStart = viewport.scrollLeft <= 1;
+      atEnd = viewport.scrollLeft + viewport.clientWidth >= viewport.scrollWidth - 1;
     };
-    const resized = new ResizeObserver(run);
-    const changed = new MutationObserver(run);
-    resized.observe(header);
-    changed.observe(header, { subtree: true, childList: true, characterData: true });
-    return () => (resized.disconnect(), changed.disconnect());
+    update();
+    const observer = new ResizeObserver(update);
+    for (const el of [viewport.parentElement!, viewport, track]) observer.observe(el);
+    viewport.addEventListener('scroll', update, { passive: true });
+    return () => {
+      observer.disconnect();
+      viewport.removeEventListener('scroll', update);
+    };
   }
 </script>
 
 {#snippet chipStrip()}
 {#if favs.length}
-  <nav class="chips" data-testid="fav-chips" data-superstar={settings.display.superstar} aria-label="Quick-switch markets">
-    {#each favs as coin (coin)}
-      {@const c = chip(coin)}
-      <span class="slot">
-        <button class="chip" data-testid="fav-chip" data-coin={coin} aria-current={coin === market.coin} title={phone.current ? undefined : 'Right-click, middle-click or Delete removes it'} onclick={(e) => (e.currentTarget.blur(), selectCoin(coin))}
-          onmousedown={(e) => e.button === 1 && e.preventDefault()} onauxclick={(e) => e.button === 1 && removeQuick(coin)}
-          oncontextmenu={(e) => !phone.current && (e.preventDefault(), removeQuick(coin))} onkeydown={(e) => (e.key === 'Delete' || e.key === 'Backspace') && (e.stopPropagation(), unchip(coin, true))}>
-          <span class="coin"><Coin {coin} /></span>
-          <!-- The current market's price and 24h are in the header. -->
-          {#if info && coin !== market.coin}
-            <span class="px num">{c?.px ?? '—'}</span>
-            <span class="chg num" class:buy={c && c.chg >= 0} class:sell={c && c.chg < 0}>{c ? fmtPct(c.chg) : '—'}</span>
-          {/if}
-        </button>
-        {#if !phone.current}<button class="unchip" data-testid="fav-chip-remove" aria-label="Remove {coin} from the top bar" onclick={(e) => unchip(coin, e.detail === 0)}>✕</button>{/if}
-      </span>
-    {/each}
-  </nav>
+  <div class="quick-strip">
+    {#if overflow}<button class="scroll" aria-label="Show earlier pinned markets" disabled={atStart} onclick={() => strip?.scrollBy(-strip.clientWidth, 0)}>‹</button>{/if}
+    <nav bind:this={strip} {@attach measure} class="chips" data-testid="fav-chips" data-superstar={settings.display.superstar} aria-label="Quick-switch markets">
+      <div class="chip-track">
+        {#each favs as coin (coin)}
+          {@const c = chip(coin)}
+          <span class="slot">
+            <button class="chip" data-testid="fav-chip" data-coin={coin} aria-current={coin === market.coin} title={phone.current ? undefined : 'Right-click, middle-click or Delete removes it'} onclick={(e) => (e.currentTarget.blur(), selectCoin(coin))}
+              onmousedown={(e) => e.button === 1 && e.preventDefault()} onauxclick={(e) => e.button === 1 && removeQuick(coin)}
+              oncontextmenu={(e) => !phone.current && (e.preventDefault(), removeQuick(coin))} onkeydown={(e) => (e.key === 'Delete' || e.key === 'Backspace') && (e.stopPropagation(), unchip(coin, true))}>
+              <span class="coin"><Coin {coin} /></span>
+              <!-- The current market's price and 24h are in the header. -->
+              {#if info && coin !== market.coin}
+                <span class="px num">{c?.px ?? '—'}</span>
+                <span class="chg num" class:buy={c && c.chg >= 0} class:sell={c && c.chg < 0}>{c ? fmtPct(c.chg) : '—'}</span>
+              {/if}
+            </button>
+            {#if !phone.current}<button class="unchip" data-testid="fav-chip-remove" aria-label="Remove {coin} from the top bar" onclick={(e) => unchip(coin, e.detail === 0)}>✕</button>{/if}
+          </span>
+        {/each}
+      </div>
+    </nav>
+    {#if overflow}<button class="scroll" aria-label="Show more pinned markets" disabled={atEnd} onclick={() => strip?.scrollBy(strip.clientWidth, 0)}>›</button>{/if}
+  </div>
 {/if}
 {#if !phone.current}{@render quickOpen()}{/if}
 {/snippet}
@@ -163,7 +168,7 @@
   </section>
 {:else}
   <header class="desk">
-    <div class="desk-nav" {@attach fit}>
+    <div class="desk-nav">
       {@render chipStrip()}
       <div class="right">
         <Connection />
@@ -204,16 +209,19 @@
   .market-summary > .stat, .fold .stat { margin-left: 20px; }
   .market-summary > :global(.zen-toggle) { margin-inline-start: auto; }
   .market-summary > .strip { margin-inline-end: 12px; }
-  .fold, .desk-nav > .chips { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
-  .fold::before, .desk-nav > .chips::before { content: ''; }
+  .fold { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
+  .fold::before { content: ''; }
   .fold { display: flex; font-size: max(8px, calc(var(--fs) * 0.917)); height: 2lh; }
   .oracle { flex-grow: 1000000; }
   .strip { flex-grow: 1000; }
-  .desk-nav > .chips { height: calc(var(--fs) * 1.167 * 1.4 + 16px); overflow-clip-margin: 4px; }
-  .chips:global(.bare) .num { display: none; }
+  .quick-strip { display: flex; align-items: center; min-width: 0; }
+  .chips { min-width: 0; overflow-x: auto; scrollbar-width: none; font-size: max(8px, calc(var(--fs) * 0.917)); }
+  .chip-track { display: flex; width: max-content; gap: 2px; padding: 4px 3px; }
+  .scroll { flex: none; align-self: stretch; min-width: 24px; padding: 0 4px; background: none; color: var(--text); font-size: 1.3em; }
+  .scroll:hover:enabled { background: var(--surface); color: var(--bright); }
+  .scroll:disabled { color: var(--faint); }
   .coin { font-weight: 600; font-size: calc(var(--fs) * 1.167); background: none; padding: 4px 0; color: var(--bright); }
   .stat { display: flex; flex-direction: column; font-size: max(8px, calc(var(--fs) * 0.917)); }
-  .chips { display: flex; gap: 2px; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .chip { display: flex; gap: 4px; align-items: baseline; padding: 4px 6px; background: none; color: var(--dim); }
   .chip[aria-current='true'] { background: var(--surface); color: var(--bright); }
   .chip .coin { font-weight: 600; }
@@ -226,9 +234,8 @@
   .quick:hover { color: var(--warn); }
   .right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-left: auto; padding-left: 20px; }
   .bar { gap: 6px; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; overflow: visible; }
-  .bar > :not(.chips, .spacer) { flex-shrink: 0; }
+  .bar > :not(.quick-strip, .spacer) { flex-shrink: 0; }
   .bar .logo { border-radius: var(--radius); }
-  .bar .chips { flex: 0 1 auto; flex-wrap: wrap; row-gap: 50vh; min-width: 0; height: max(36px, calc(var(--fs) * 1.4 + 8px)); margin-left: 0; overflow: clip; }
   .bar [data-testid='settings-button'] { background: none; border: 1px solid var(--line); border-radius: var(--radius); font-size: calc(var(--fs) * 1.333); }
   .spacer { flex: 1 0 0; }
   .price { container-type: inline-size; }

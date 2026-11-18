@@ -1,12 +1,12 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { fractionOfEquity, inventory, summary, usdValue } from '$lib/account/inventory.svelte';
+  import { inventory, summary, usdValue } from '$lib/account/inventory.svelte';
   import { openOrders, type OpenOrder } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { meta } from '$lib/market/meta.svelte';
   import { fees } from '$lib/account/fees.svelte';
-  import { fmtNum, fmtUsd, fmtUsdShort } from '$lib/util/format';
+  import { fmtNum, fmtUsd } from '$lib/util/format';
   import Coin from './Coin.svelte';
   import IdleYield from './IdleYield.svelte';
 
@@ -17,20 +17,8 @@
   const pct = (n: number) => (loaded && Number.isFinite(n) ? `${fmtNum(n * 100, 2)}%` : '—');
   const lev = (n: number) => (loaded && Number.isFinite(n) ? `${fmtNum(n, 2)}×` : '—');
   const usdOf = (n: number) => (loaded ? fmtUsd(n) : '—');
-  const exposureOf = (n: number) => Number.isFinite(n) ? `${lev(fractionOfEquity(n, s.equity))} (${fmtUsdShort(n)})` : '—';
   type Row = { id: string; label: string; value: string; title?: string; pnl?: boolean };
   const upnl = $derived<Row>({ id: 'inv-upnl', label: 'Unrealized PnL', value: usdOf(s.uPnl), title: 'excl. funding & fees', pnl: true });
-  const notionals = $derived.by(() => {
-    if (!loaded || inventory.broken.length) return { gross: NaN, delta: NaN };
-    let gross = 0, delta = 0;
-    for (const p of inventory.positions) {
-      if (!p.szi) continue;
-      const value = Math.abs(p.positionValue);
-      gross += value;
-      delta += Math.sign(p.szi) * value;
-    }
-    return { gross, delta };
-  });
   // HL's account panel rows and labels: one set for portfolio-margin and unified accounts, Spot, Perps and Perps Overview for the rest.
   const rows = $derived.by((): Row[] => {
     if (s.mode === 'portfolioMargin' || s.mode === 'unifiedAccount') {
@@ -58,11 +46,7 @@
   });
   const groups = $derived([
     { title: 'Balance', rows: rows.slice(0, rows.findIndex((r) => r.id === 'inv-ratio')) },
-    { title: 'Margin', rows: rows.slice(rows.findIndex((r) => r.id === 'inv-ratio')) },
-    { title: 'Account Leverage', rows: [
-      { id: 'inv-gross-exposure', label: 'Gross exposure', value: exposureOf(notionals.gross), title: `Effective leverage: absolute open perp exposure (${usdOf(notionals.gross)}) divided by account equity (${usdOf(s.equity)}).` },
-      { id: 'inv-net-delta', label: 'Net delta', value: exposureOf(notionals.delta), title: `Long minus short perp exposure (${usdOf(notionals.delta)}) divided by account equity (${usdOf(s.equity)}).` }
-    ] }
+    { title: 'Margin', rows: rows.slice(rows.findIndex((r) => r.id === 'inv-ratio')) }
   ]);
   const whole = (n: number) => `$${fmtNum(n, 0)}`;
   const rate = (r: number) => `${(r * 100).toFixed(4)}%`;
@@ -72,7 +56,6 @@
   );
   function tone(r: Row) {
     if (!loaded) return '';
-    if (r.id === 'inv-net-delta') return notionals.delta > 0 ? 'buy' : notionals.delta < 0 ? 'sell' : '';
     if (r.pnl) return Number.isFinite(s.uPnl) ? s.uPnl < 0 ? 'sell' : 'buy' : '';
     if (r.id === 'inv-available' && Number.isFinite(s.available)) return s.available > 0 ? 'buy' : s.available < 0 ? 'sell' : 'warn';
     const ratio = r.id === 'inv-ratio' ? s.ratio : r.id === 'inv-borrow' ? s.borrow : NaN;

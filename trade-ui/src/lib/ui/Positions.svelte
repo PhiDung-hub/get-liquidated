@@ -53,11 +53,12 @@
   }
   const totals = $derived.by(() => {
     if (inventory.broken.length) return null;
-    let pnl = 0, margin = 0, since = 0;
+    let pnl = 0, margin = 0, since = 0, exposure = 0;
     let today: number | null = todayFunding ? 0 : null;
     let hourly: number | null = 0;
     for (const p of openPositions) {
       pnl += p.uPnl;
+      exposure += Math.abs(p.positionValue);
       margin += p.marginUsed;
       since -= p.fundingSinceOpen;
       if (today !== null) today += todayFunding?.get(p.coin) ?? 0;
@@ -66,10 +67,12 @@
         hourly = amount === null ? null : hourly + amount;
       }
     }
-    return { pnl, margin, since, today, hourly };
+    return { pnl, margin, since, today, hourly, exposure };
   });
   const fundingAmount = (n: number | null) => n === null ? '—' : Math.abs(n) > 0 && Math.abs(n) < 0.01 ? `${n < 0 ? '-' : '+'}$${fmtNum(Math.abs(n), 4)}` : `${n > 0 ? '+' : ''}${fmtUsd(n)}`;
   const equity = $derived(summary().equity);
+  const grossExposure = $derived(inventory.loaded ? totals?.exposure ?? NaN : NaN);
+  const accountLeverage = $derived(fractionOfEquity(grossExposure, equity));
   const accountReturn = $derived(fractionOfEquity(totals?.pnl ?? NaN, equity));
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
   const priceTone = (p: Position) => {
@@ -136,6 +139,12 @@
   <span class="pnl"><span data-testid="position-pnl" data-help title="{fmtUsd(p.uPnl)} · {fmtPct(p.roe)} ROE · {fmtPct(fractionOfEquity(p.uPnl, equity))} of account equity">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render percentage(p.roe)}</span>)</span>
 {/snippet}
 {#snippet liq(p: Position)}{@const d = liqDist(p)}{p.liqPx ? fmtPx(p.liqPx, dec(p.coin)) : '—'}{#if p.liqPx && d !== '>1000%'}{' '}<span class="dim" data-testid="position-liq-distance">({p.liqPx < mark(p) ? '-' : '+'}{d})</span>{/if}{/snippet}
+{#snippet marginShare(amount: number)}
+  {@const pct = fractionOfEquity(amount, equity) * 100}
+  {#if Number.isFinite(pct)}
+    <span class="margin-share dim num" data-help title="Margin used ({fmtUsd(amount)}) as a share of account equity ({fmtUsd(equity)}): {fmtNum(pct, 2)}%" data-testid="margin-equity-share">({Math.abs(pct) >= 1000 ? fmtCompact(pct) : fmtNum(pct, 2)}%)</span>
+  {/if}
+{/snippet}
 {#snippet margin(p: Position, card = false)}
   <span class="margin-amount">
   {#if p.leverage.type === 'cross'}
@@ -146,6 +155,7 @@
   {/if}
   </span>
   {#if !card}{' '}<span class="margin-mode dim" data-testid="position-margin-mode">{p.leverage.type === 'cross' ? 'Cross' : 'Isolated'}</span>{/if}
+  {@render marginShare(p.marginUsed)}
 {/snippet}
 {#snippet tpsl(p: Position, card = false)}{@const exits = triggers(p)}<button class="link tpsl" class:buy={exits.length > 0 && p.szi < 0} class:sell={exits.length > 0 && p.szi > 0} title="Add or edit TP/SL" data-testid="position-tpsl" disabled={!listed(p.coin)} aria-label={`Edit ${p.coin} TP/SL`} onclick={(e) => editTpsl(e, p.coin)}>{#if card && exits.length}{#each exits as o (o.oid)}<span class="tpsl-trigger">{o.orderType.startsWith('Take') ? 'TP' : 'SL'} {fmtPx(o.triggerPx, dec(p.coin))}</span>{/each}{:else}{exits.map((o) => `${o.orderType.startsWith('Take') ? 'TP' : 'SL'} ${fmtPx(o.triggerPx, dec(p.coin))}`).join(' / ') || '+ Add'}{/if}</button>{/snippet}
 
@@ -161,12 +171,22 @@
 
 {#snippet pnlTotal()}
   <b class="sum num" class:buy={(totals?.pnl ?? 0) > 0} class:sell={(totals?.pnl ?? 0) < 0} data-testid="positions-total-pnl">
-    {@render usd(totals?.pnl ?? NaN)} <span class="account-return" data-help title="Unrealized PnL as a share of account equity ({fmtUsd(equity)}): {fmtPct(accountReturn)}">({@render percentage(accountReturn)} acct)</span>
+    {@render usd(totals?.pnl ?? NaN)} <span class="account-return" data-help title="Unrealized PnL as a share of account equity ({fmtUsd(equity)}): {fmtPct(accountReturn)}">({@render percentage(accountReturn)})</span>
   </b>
 {/snippet}
-{#snippet marginTotal()}<b class="sum num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b>{/snippet}
+{#snippet marginTotal()}
+  <b class="sum num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b>
+  <div class="margin-share-total">{@render marginShare(totals?.margin ?? NaN)}</div>
+{/snippet}
 {#snippet fundingTotal()}
   <span class="sum">{@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}</span>
+{/snippet}
+
+{#snippet exposureTotal()}
+  <b class="sum num" data-help title="Total perp exposure {fmtUsd(grossExposure)}" data-testid="positions-total-exposure">{fmtUsdShort(grossExposure)}</b>
+  <span class="leverage-total dim num" data-help title="Overall account leverage: total perp exposure ({fmtUsd(grossExposure)}) divided by account equity ({fmtUsd(equity)})" data-testid="positions-account-leverage">
+    {Number.isFinite(accountLeverage) ? `${fmtNum(accountLeverage, 2)}× acct` : '—'}
+  </span>
 {/snippet}
 
 {#if !rows.length}
@@ -225,7 +245,9 @@
     </tbody>
     <tfoot class="totals" aria-label="All open perp positions" data-testid="positions-totals">
       <tr>
-        <td colspan="5"></td>
+        <td colspan="2"></td>
+        <td>{@render exposureTotal()}</td>
+        <td colspan="2"></td>
         <td>{@render pnlTotal()}</td>
         <td></td>
         <td>{@render marginTotal()}</td>
@@ -237,6 +259,7 @@
 {/if}
 {#if openPositions.length && (cards.current || !rows.length)}
   <div class="totals summary-grid" aria-label="All open perp positions" role="group" data-testid="positions-totals">
+    <div><span class="total-label">Total exposure</span>{@render exposureTotal()}</div>
     <div><span class="total-label">Unrealized PnL</span>{@render pnlTotal()}</div>
     <div><span class="total-label" title="Sum of margin used by open positions">Margin used</span>{@render marginTotal()}</div>
     <div><span class="total-label">Funding</span>{@render fundingTotal()}</div>
@@ -253,6 +276,8 @@
   .tpsl:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
   p { padding: 12px; }
   .margin { white-space: nowrap; }
+  td .margin-share { margin-left: 4px; }
+  .margin-share-total { margin-top: 2px; }
   .margin-mode { margin-left: 4px; font-size: max(8px, 0.9em); }
   .margin [data-testid='margin-edit'] { background: none; color: var(--accent); }
   .sweeps { display: flex; justify-content: flex-end; padding: 6px 8px 0; }
@@ -274,6 +299,7 @@
   .summary .label, .position-details .label, .head-pnl .label { font-size: max(10px, calc(var(--fs) * 0.857)); }
   .summary > .field > .value { font-weight: 500; }
   .card .value { display: flex; align-items: baseline; min-height: 20px; font-size: min(var(--fs), 5cqi); line-height: 20px; white-space: nowrap; overflow-wrap: normal; }
+  .card .margin .value { flex-direction: column; align-items: flex-end; }
   .card .margin-amount { display: flex; align-items: baseline; min-height: 24px; }
   .card .margin-mode { margin-left: 4px; font-size: inherit; }
   .card .tpsl, .card [data-testid='margin-edit'] { display: flex; align-items: stretch; justify-content: flex-start; min-height: 24px; min-width: 0; padding: 0; text-align: left; line-height: inherit; }
@@ -296,11 +322,12 @@
   .price.mark.buy { color: var(--buy-text); }
   .price.mark.sell { color: var(--sell-text); }
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
-  tfoot td { padding-block: 12px 6px; vertical-align: bottom; }
+  tfoot td { padding-block: 12px 6px; vertical-align: top; }
   .sum { position: relative; display: inline-block; padding-top: 5px; }
-  .account-return { white-space: nowrap; }
+  .account-return, .leverage-total { white-space: nowrap; }
+  .leverage-total { display: block; margin-top: 2px; }
   .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
   .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }
   .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
   .totals .funding-value { font-weight: 700; }

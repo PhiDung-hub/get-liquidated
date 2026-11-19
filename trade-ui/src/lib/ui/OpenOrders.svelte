@@ -32,7 +32,7 @@
   const cardType = (o: OpenOrder) => (isTrailing(o) ? 'Trailing Stop' : `${o.orderType}${o.tif && !o.isTrigger && o.tif !== 'Gtc' ? ` ${o.tif}` : ''}`);
   const sizeText = (o: OpenOrder) => (whole(o) ? 'Whole position' : `${fmtSz(o.sz, dec(o.coin))}${o.sz !== o.origSz ? ` / ${fmtSz(o.origSz, dec(o.coin))}` : ''}`);
   const triggerOf = (o: OpenOrder) => (isTrailing(o) ? o.triggerCondition || '—' : o.isTrigger ? px(o.coin, o.triggerPx) : '—');
-  const marginText = (margin: OrderMargin) => margin.value !== null ? `${margin.kind === 'estimate' ? '≈ ' : ''}${fmtIn(margin.value, margin.quote)}` : margin.kind === 'spot' ? 'N/A' : margin.kind === 'conditional' ? 'Not reserved' : '—';
+  const marginText = (margin: OrderMargin) => margin.value !== null ? fmtIn(margin.value, margin.quote) : margin.kind === 'spot' ? 'N/A' : margin.kind === 'conditional' ? 'Not reserved' : '—';
   let cardWidth = $state(0);
   const fullDetails = $derived(cardWidth >= 600);
   const sorter = new Sorter<OpenOrder>([
@@ -140,7 +140,6 @@
             <div class="field"><span class="label">Value</span><span class="value num">{whole(o) ? '—' : valueText(o)}</span></div>
             <div class="field" title={margin.note}><span class="label">Margin</span><span class="value num" data-testid="order-margin">{marginText(margin)}</span></div>
             {#if o.tif && !o.isTrigger}<div class="field"><span class="label">Time in force</span><span class="value">{o.tif}</span></div>{/if}
-            <div class="field"><span class="label">Order ID</span><span class="value num">{o.oid}</span></div>
           </div>
         {/if}
         </div>

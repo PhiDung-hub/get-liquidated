@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import HyperdashFeed from './HyperdashFeed.svelte';
   import PaymentAccess from './PaymentAccess.svelte';
 
   type Integration = { id: string; name: string; availability: 'awaiting_api'; data_available: false; message: string };
@@ -46,19 +47,18 @@
 <div class="integrations" data-testid="integration-settings">
   <PaymentAccess />
   <p class="intro">Additional market data</p>
+  <HyperdashFeed />
   {#if loading}
     <p role="status">Loading integrations…</p>
   {:else if error}
     <div class="error" role="status"><p>{error}</p><button onclick={refresh}>Retry</button></div>
   {:else}
-    {#each providers as provider (provider.id)}
+    {#each providers.filter(p => p.id !== 'hyperdash') as provider (provider.id)}
       <section data-testid="integration-{provider.id}">
         <header><h4>{provider.name}</h4><span class="badge">Coming soon</span></header>
         <p>{provider.message}</p>
-        {#if provider.id === 'hyperdash'}<a href="https://hyperdash.com" target="_blank" rel="noopener noreferrer">About Hyperdash ↗</a>{/if}
       </section>
     {/each}
-    {#if !providers.length}<p>No additional market data integrations are configured.</p>{/if}
   {/if}
 </div>
 
@@ -70,6 +70,5 @@
   h4 { margin: 0; font-weight: 600; color: var(--bright); }
   .badge { padding: 3px 7px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); font-size: max(8px, 0.9em); }
   p { color: var(--dim); line-height: 1.5; }
-  a { color: var(--accent); }
   .error p { margin-top: 0; }
 </style>

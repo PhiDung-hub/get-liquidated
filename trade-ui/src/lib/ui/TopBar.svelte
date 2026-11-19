@@ -107,8 +107,7 @@
               onmousedown={(e) => e.button === 1 && e.preventDefault()} onauxclick={(e) => e.button === 1 && removeQuick(coin)}
               oncontextmenu={(e) => !phone.current && (e.preventDefault(), removeQuick(coin))} onkeydown={(e) => (e.key === 'Delete' || e.key === 'Backspace') && (e.stopPropagation(), unchip(coin, true))}>
               <span class="coin"><Coin {coin} /></span>
-              <!-- The current market's price and 24h are in the header. -->
-              {#if info && coin !== market.coin}
+              {#if info}
                 <span class="px num">{c?.px ?? '—'}</span>
                 <span class="chg num" class:buy={c && c.chg >= 0} class:sell={c && c.chg < 0}>{c ? fmtPct(c.chg) : '—'}</span>
               {/if}

@@ -175,18 +175,21 @@
   </b>
 {/snippet}
 {#snippet marginTotal()}
-  <b class="sum num" data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</b>
-  <div class="margin-share-total">{@render marginShare(totals?.margin ?? NaN)}</div>
+  <b class="sum num inline-total">
+    <span data-testid="positions-total-margin">{@render usd(totals?.margin ?? NaN)}</span>{' '}{@render marginShare(totals?.margin ?? NaN)}
+  </b>
 {/snippet}
 {#snippet fundingTotal()}
   <span class="sum">{@render fundingValue(totals?.since ?? null, totals?.today ?? null, totals?.hourly ?? null, true)}</span>
 {/snippet}
 
 {#snippet exposureTotal()}
-  <b class="sum num" data-help title="Total perp exposure {fmtUsd(grossExposure)}" data-testid="positions-total-exposure">{fmtUsdShort(grossExposure)}</b>
-  <span class="leverage-total dim num" data-help title="Overall account leverage: total perp exposure ({fmtUsd(grossExposure)}) divided by account equity ({fmtUsd(equity)})" data-testid="positions-account-leverage">
-    {Number.isFinite(accountLeverage) ? `${fmtNum(accountLeverage, 2)}× acct` : '—'}
-  </span>
+  <b class="sum num inline-total">
+    <span data-help title="Total perp exposure {fmtUsd(grossExposure)}" data-testid="positions-total-exposure">{fmtUsdShort(grossExposure)}</span>{' '}
+    <span class="dim" data-help title="Overall account leverage: total perp exposure ({fmtUsd(grossExposure)}) divided by account equity ({fmtUsd(equity)})" data-testid="positions-account-leverage">
+      {Number.isFinite(accountLeverage) ? `(${fmtNum(accountLeverage, 2)}×)` : '—'}
+    </span>
+  </b>
 {/snippet}
 
 {#if !rows.length}
@@ -276,8 +279,7 @@
   .tpsl:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
   p { padding: 12px; }
   .margin { white-space: nowrap; }
-  td .margin-share { margin-left: 4px; }
-  .margin-share-total { margin-top: 2px; }
+  td.margin > .margin-share { margin-left: 4px; }
   .margin-mode { margin-left: 4px; font-size: max(8px, 0.9em); }
   .margin [data-testid='margin-edit'] { background: none; color: var(--accent); }
   .sweeps { display: flex; justify-content: flex-end; padding: 6px 8px 0; }
@@ -324,10 +326,9 @@
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
   tfoot td { padding-block: 12px 6px; vertical-align: top; }
   .sum { position: relative; display: inline-block; padding-top: 5px; }
-  .account-return, .leverage-total { white-space: nowrap; }
-  .leverage-total { display: block; margin-top: 2px; }
+  .account-return, .inline-total { white-space: nowrap; }
   .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
   .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }
   .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
   .totals .funding-value { font-weight: 700; }

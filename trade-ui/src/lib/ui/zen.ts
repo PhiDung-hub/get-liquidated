@@ -1,10 +1,13 @@
+import { MediaQuery } from 'svelte/reactivity';
 import { persist, settings, type ZenOpen } from '$lib/settings/settings.svelte';
 import { session } from '$lib/session/session.svelte';
 import { ui } from './state.svelte';
 
-export const inZen = () => settings.display.zen && !!session.master;
+const mobile = new MediaQuery('max-width: 900px');
+export const inZen = () => !mobile.current && settings.display.zen && !!session.master;
 
 export function setZen(on: boolean) {
+  if (on && mobile.current) return;
   if (on && !session.master) throw new Error('connect a wallet first');
   settings.display.zen = on;
   persist();

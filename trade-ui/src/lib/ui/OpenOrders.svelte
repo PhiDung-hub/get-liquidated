@@ -76,7 +76,7 @@
 </script>
 
 {#if chaseList.length && cards.current}
-  <div class="cards">
+  <div class="cards trading-rows">
     {#each chaseList as c (c.id)}
       <div class="card" data-testid="chase-row">
         <div class="head"><span><Coin coin={c.coin} /> <b class:buy={c.isBuy} class:sell={!c.isBuy}>{c.isBuy ? 'Buy' : 'Sell'}</b> <span class="dim">Chase</span></span></div>
@@ -115,7 +115,7 @@
 {#if !list.length}
   <p class="dim" data-testid="account-empty">{viewAddress() && !openOrders.loaded ? 'Loading orders…' : openOrders.list.length ? 'No open orders match the filter.' : 'No open orders.'}</p>
 {:else if cards.current}
-  <div class="cards" bind:clientWidth={cardWidth}>
+  <div class="cards trading-rows" bind:clientWidth={cardWidth}>
     {#each list as o (o.oid)}
       {@const open = fullDetails || expanded.has(foldKey(o))}
       {@const trigger = o.isTrigger || isTrailing(o)}

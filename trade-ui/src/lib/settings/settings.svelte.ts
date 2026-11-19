@@ -61,7 +61,7 @@ export const DEFAULTS: Settings = {
   dismissedDexes: [],
   chart: { interval: '15m', pinnedIntervals: [], desktopPinnedIntervals: [...INTERVALS], volume: true, timezone: 'UTC', indicators: { positions: { on: true }, fills: { on: true }, drawings: { on: true }, ai: { on: true } }, studies: DEFAULT_STUDIES, favStudies: [], compare: {}, panes: [] },
   panel: { kind: 'market', sizeUnit: 'coin' },
-  display: { minimized: { trade: false, account: false, book: false, positions: false }, theme: 'hyperliquid', fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 240, panel: PANEL_MIN, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
+  display: { minimized: { trade: false, account: false, book: false, positions: false }, theme: THEMES[0].id, fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 240, panel: PANEL_MIN, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
 };
 
 const KEY = SETTINGS_KEY;

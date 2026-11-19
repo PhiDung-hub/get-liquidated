@@ -44,6 +44,8 @@
   import TrailingModal from '$lib/ui/order/TrailingModal.svelte';
   import EditOrderModal from '$lib/ui/order/EditOrderModal.svelte';
   import AccountTabs from '$lib/ui/AccountTabs.svelte';
+  import Positions from '$lib/ui/Positions.svelte';
+  import MarketFunding from '$lib/ui/MarketFunding.svelte';
   import Account from '$lib/ui/Account.svelte';
   import OrderBook from '$lib/ui/OrderBook.svelte';
   import { MAX_ROWS } from '$lib/market/book.svelte';
@@ -135,7 +137,7 @@
       if (vv.scale !== 1) return;
       const kb = innerHeight - vv.height - vv.offsetTop;
       document.documentElement.toggleAttribute('data-keyboard', kb >= 100);
-      const scroller = document.querySelector('[data-testid="panel"]')?.closest('.trade-body, .zen .mobile-trade, .phone');
+      const scroller = document.querySelector('[data-testid="panel"]')?.closest('.trade-body, .phone');
       const below = scroller ? innerHeight - scroller.getBoundingClientRect().bottom : 0;
       document.documentElement.style.setProperty('--kb', `${kb < 100 ? 0 : kb}px`);
       document.documentElement.style.setProperty('--below', `${below}px`);
@@ -290,7 +292,7 @@
     if (tab === 'market' && ui.marketTab === 'chart' && accountFirst) phoneChart = true;
   });
   const PHONE_TABS: [PhoneTab, string][] = [['market', 'Market'], ['trade', 'Trade'], ['account', 'Account']];
-  const SEGMENTS: [typeof ui.marketTab, string][] = [['chart', 'Chart'], ['book', 'Book'], ['trades', 'Trades']];
+  const SEGMENTS: [typeof ui.marketTab, string][] = [['chart', 'Chart'], ['book', 'Book'], ['trades', 'Trades'], ['funding', 'Funding']];
   function pickPhoneTab(e: MouseEvent, t: PhoneTab) {
     if (e.detail) (e.currentTarget as HTMLElement).blur();
     settings.display.phoneTab = t;
@@ -387,43 +389,35 @@
     <ZenStrip />
   {/if}
   {#if phone.current}
-    <main class="phone" data-testid="phone" data-tab={zen ? 'zen' : tab} bind:clientHeight={phoneH}>
-      {#if zen}
-        <section class="chart"><Chart /></section>
-        {#if zenOpen.book}<section class="zen-book"><OrderBook /></section>{/if}
-        {#if zenOpen.positions}<section class="account" class:minimized={settings.display.minimized.positions}><AccountTabs /></section>{/if}
-      {:else}
-        <!-- The chart stays mounted, hidden, on other tabs and segments, so coming back keeps its pan/zoom without a rebuild or a candle refetch. -->
-        <section class="market" class:full={settings.display.minimized.positions} data-testid="phone-market" style:flex-basis={!min.positions && phoneH ? `${lay.phone}px` : null} hidden={tab !== 'market'}>
-          <nav class="side-tabs ui-tabs segments">
-            {#each SEGMENTS as [id, label] (id)}
-              <button class="ui-tab" class:on={ui.marketTab === id} aria-pressed={ui.marketTab === id} data-testid="market-seg-{id}" onclick={(e) => ((ui.marketTab = id), e.detail && e.currentTarget.blur())}>{label}</button>
-            {/each}
-          </nav>
-          <div class="pane" hidden={ui.marketTab !== 'chart'}>{#if phoneChart}<Chart />{/if}</div>
-          {#if tab === 'market' && ui.marketTab !== 'chart'}<div class="pane" class:trades={ui.marketTab === 'trades'}>{#if ui.marketTab === 'book'}<OrderBook totals onpick={() => { settings.display.phoneTab = 'trade'; persist(); }} />{:else}<Trades />{/if}</div>{/if}
-        </section>
-        {#if tab === 'market'}<section class="positions" data-testid="phone-positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></section>{/if}
-        {#if tab === 'account'}
-          <section class="me" data-testid="phone-account"><Connection />{#if viewAddress()}<Account /><div class="positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></div><div class="devices"><Devices /></div>{/if}<StatusBar /></section>
-        {/if}
+    <main class="phone" data-testid="phone" data-tab={tab} bind:clientHeight={phoneH}>
+      <!-- The chart stays mounted, hidden, on other tabs and segments, so coming back keeps its pan/zoom without a rebuild or a candle refetch. -->
+      <section class="market" class:full={settings.display.minimized.positions} data-testid="phone-market" style:flex-basis={!min.positions && phoneH ? `${lay.phone}px` : null} hidden={tab !== 'market'}>
+        <nav class="side-tabs ui-tabs segments">
+          {#each SEGMENTS as [id, label] (id)}
+            <button class="ui-tab" class:on={ui.marketTab === id} aria-pressed={ui.marketTab === id} data-testid="market-seg-{id}" onclick={(e) => ((ui.marketTab = id), e.detail && e.currentTarget.blur())}>{label}</button>
+          {/each}
+        </nav>
+        <div class="pane" hidden={ui.marketTab !== 'chart'}>{#if phoneChart}<Chart />{/if}</div>
+        {#if tab === 'market' && ui.marketTab !== 'chart'}<div class="pane" class:trades={ui.marketTab === 'trades'}>{#if ui.marketTab === 'book'}<OrderBook totals onpick={() => { settings.display.phoneTab = 'trade'; persist(); }} />{:else if ui.marketTab === 'funding'}<MarketFunding />{:else}<Trades />{/if}</div>{/if}
+      </section>
+      {#if tab === 'market'}<section class="positions" data-testid="phone-positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></section>{/if}
+      {#if tab === 'account'}
+        <section class="me" data-testid="phone-account"><Connection />{#if viewAddress()}<Account /><Positions totalsOnly /><div class="positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></div><div class="devices"><Devices /></div>{/if}<StatusBar /></section>
       {/if}
       <!-- One panel stays mounted on every tab: its coin-switch clear and typed scale/chase/TP-SL text live in the component. -->
-      <div class="mobile-trade" class:shown={zen ? zenOpen.order : tab === 'trade'}>
+      <div class="mobile-trade" class:shown={tab === 'trade'}>
         <section class="trade-form">{#if quickRow && tab === 'trade'}<QuickMarkets coins={quickCoins} />{/if}<OrderPanel /></section>
-        {#if !zen && tab === 'trade'}<section class="trade-book"><OrderBook rowRange={[7, MAX_ROWS]} /></section>{/if}
+        {#if tab === 'trade'}<section class="trade-book"><OrderBook rowRange={[7, MAX_ROWS]} /></section>{/if}
       </div>
-      {#if !zen && tab === 'trade'}<section class="positions" data-testid="phone-positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></section>{/if}
+      {#if tab === 'trade'}<section class="positions" data-testid="phone-positions" class:minimized={settings.display.minimized.positions}><AccountTabs /></section>{/if}
     </main>
-    {#if !zen}
-      <nav class="tabbar ui-tabs" data-testid="phone-tabs">
-        {#each PHONE_TABS as [id, label] (id)}
-          <button class="ui-tab" class:on={tab === id} aria-pressed={tab === id} data-testid="phone-tab-{id}" onclick={(e) => pickPhoneTab(e, id)}>
-            {label}
-          </button>
-        {/each}
-      </nav>
-    {/if}
+    <nav class="tabbar ui-tabs" data-testid="phone-tabs">
+      {#each PHONE_TABS as [id, label] (id)}
+        <button class="ui-tab" class:on={tab === id} aria-pressed={tab === id} data-testid="phone-tab-{id}" onclick={(e) => pickPhoneTab(e, id)}>
+          {label}
+        </button>
+      {/each}
+    </nav>
   {:else}
     <main
       class="grid" class:tall bind:clientWidth={gridW} bind:clientHeight={gridH}
@@ -538,8 +532,8 @@
   .phone { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; background: var(--gutter); }
   @media (max-width: 900px), (pointer: coarse) and (max-height: 500px) {
     :global(html) { touch-action: pan-x pan-y; }
-    .phone, .trade-body, .zen .mobile-trade { scroll-padding-bottom: calc(var(--ctl) + 20px + max(0px, var(--kb, 0px) - var(--below, 0px))); scrollbar-width: none; }
-    .phone::-webkit-scrollbar, .trade-body::-webkit-scrollbar, .zen .mobile-trade::-webkit-scrollbar { display: none; }
+    .phone, .trade-body { scroll-padding-bottom: calc(var(--ctl) + 20px + max(0px, var(--kb, 0px) - var(--below, 0px))); scrollbar-width: none; }
+    .phone::-webkit-scrollbar, .trade-body::-webkit-scrollbar { display: none; }
   }
   .market { position: relative; flex: 0 0 clamp(300px, 62%, 600px); min-height: 0; display: flex; flex-direction: column; overflow: visible; }
   .market.full { flex: 1 1 0; }
@@ -548,7 +542,6 @@
   .market .pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .market .pane.trades { overflow-y: auto; }
   .market[hidden], .market .pane[hidden] { display: none; }
-  .phone .account { flex: 1 0 160px; display: flex; flex-direction: column; }
   .positions { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 220px; background: var(--panel); }
   .me .positions { flex: none; border-top: 1px solid var(--line); }
   .positions.minimized { min-height: 34px; }
@@ -565,12 +558,4 @@
   .tabbar button { height: 48px; }
   .app.zen { height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
   .zen > .topbar, .zen > :global(footer), .grid > .shut { display: none; }
-  .zen .phone { position: relative; overflow: hidden; }
-  .zen .phone > .chart { flex: 1; }
-  .zen .phone > .zen-book { flex: 0 0 30%; display: flex; flex-direction: column; overflow: hidden; }
-  .zen .phone > .account { flex: 0 0 34%; min-height: 150px; }
-  .zen .mobile-trade { display: block; position: absolute; inset: 0 0 auto; max-height: 100%; overflow: auto; z-index: 4; }
-  .zen .mobile-trade:not(.shown) { display: none; }
-  .zen .phone > .account.minimized { flex: none; min-height: 0; }
-  .zen .phone:has(> .account:not(.minimized)) .mobile-trade { max-height: min(66%, calc(100% - 150px)); }
 </style>

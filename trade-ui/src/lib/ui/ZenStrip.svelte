@@ -6,7 +6,7 @@
   import { socket } from '$lib/transport/ws.svelte';
   import { session } from '$lib/session/session.svelte';
   import { armed, setArmed } from '$lib/hotkeys/armed.svelte';
-  import { fmtCompact, fmtPct, fmtPx, fmtSz, fmtUsd } from '$lib/util/format';
+  import { fmtIn, fmtPct, fmtPx, fmtSz, fmtUsd } from '$lib/util/format';
   import { settings } from '$lib/settings/settings.svelte';
   import { ui } from './state.svelte';
   import { toggleZenPart } from './zen';
@@ -35,9 +35,9 @@
       {#if !spot}
         <span class="metric"><span class="dim">Oracle</span><span class="num" data-testid="zen-oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, dec) : '—'}</span></span>
         <span class="metric"><span class="dim">Funding</span><FundingRate rate={ctx?.funding ?? null} prefix="zen-" /></span>
-        <span class="metric"><span class="dim">OI</span><span class="num" data-testid="zen-open-interest">{ctx?.openInterest != null ? `$${fmtCompact(ctx.openInterest * ctx.markPx)}` : '—'}</span></span>
+        <span class="metric"><span class="dim">OI</span><span class="num" data-testid="zen-open-interest">{ctx?.openInterest != null ? fmtUsd(ctx.openInterest * ctx.markPx) : '—'}</span></span>
       {/if}
-      <span class="metric"><span class="dim">24h Vol</span><span class="num" data-testid="zen-day-volume">{ctx ? quote === 'USDC' ? `$${fmtCompact(ctx.dayNtlVlm)}` : `${fmtCompact(ctx.dayNtlVlm)} ${quote}` : '—'}</span></span>
+      <span class="metric"><span class="dim">24h Vol</span><span class="num" data-testid="zen-day-volume">{ctx ? fmtIn(ctx.dayNtlVlm, quote) : '—'}</span></span>
     </div>
     {#if !spot && pos && pos.szi !== 0}
       <span class="num" data-testid="zen-pos" class:buy={pos.szi > 0} class:sell={pos.szi < 0}>{pos.szi > 0 ? 'Long' : 'Short'} {fmtSz(Math.abs(pos.szi), dec)}</span>

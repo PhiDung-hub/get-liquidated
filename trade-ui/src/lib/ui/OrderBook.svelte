@@ -33,10 +33,10 @@
     let total = 0;
     let notional = 0;
     const count = Math.min(w, levels.length);
-    const rows = new Array<{ px: number; sz: number; total: number; notional: number }>(count);
+    const rows = new Array<{ rank: number; px: number; sz: number; total: number; notional: number }>(count);
     for (let i = 0; i < count; i++) {
       const { px, sz } = levels[i];
-      rows[reverse ? count - 1 - i : i] = { px, sz, total: (total += sz), notional: (notional += sz * px) };
+      rows[reverse ? count - 1 - i : i] = { rank: i, px, sz, total: (total += sz), notional: (notional += sz * px) };
     }
     return rows;
   };
@@ -54,13 +54,13 @@
   const spread = $derived(bid > 0 && ask > 0 ? ask - bid : NaN);
   const spreadPct = $derived(Math.max(0.001, (spread / ((ask + bid) / 2)) * 100));
   // Hovering a level sums every level from the mid out to it, as Hyperliquid's book does.
-  let hovered = $state<{ side: 'ask' | 'bid'; px: number; x: number; y: number } | null>(null);
-  const reach = $derived(hovered ? (hovered.side === 'ask' ? asks : bids).find((l) => l.px === hovered!.px) : undefined);
-  const inReach = (side: 'ask' | 'bid', px: number) => hovered?.side === side && !!reach && (side === 'ask' ? px <= hovered.px : px >= hovered.px);
-  function hover(e: PointerEvent, side: 'ask' | 'bid', px: number) {
+  let hovered = $state<{ side: 'ask' | 'bid'; rank: number; x: number; y: number } | null>(null);
+  const reach = $derived(hovered ? (hovered.side === 'ask' ? asks.at(-1 - hovered.rank) : bids[hovered.rank]) : undefined);
+  const inReach = (side: 'ask' | 'bid', rank: number) => hovered?.side === side && !!reach && rank <= hovered.rank;
+  function hover(e: PointerEvent, side: 'ask' | 'bid', rank: number) {
     if (e.pointerType === 'touch') return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    hovered = { side, px, x: r.left, y: r.top + r.height / 2 };
+    hovered = { side, rank, x: r.left, y: r.top + r.height / 2 };
   }
   const fmtRow = (px: number) => fmtPx(px, dec, isSpot(market.coin));
 
@@ -111,25 +111,25 @@
     </div>
     <div class="cols"><span>Price</span><span>Size{unit}</span>{#if full}<span>Total{unit}</span>{/if}</div>
   </div>
-  <div class="ladder" role="group" aria-label="Order book levels" class:filled={asks.length === w && bids.length === w} style:--rows={w} bind:this={ladder} onpointerleave={() => (hovered = null)}>
-    {#each asks as l}
-      <button class="row" class:reach={inReach('ask', l.px)} class:edge={hovered?.side === 'ask' && hovered.px === l.px} data-testid="book-ask" style="--w:{((amount(l, true) / max) * 100).toFixed(1)}%" onpointerenter={(e) => hover(e, 'ask', l.px)} onclick={(e) => (e.currentTarget.blur(), pick(rowPx(l.px, false)))}>
+  <div class="ladder" role="group" aria-label="Order book levels" style:--rows={w} bind:this={ladder} onpointerleave={() => (hovered = null)}>
+    {#each asks as l (l.rank)}
+      <button class="row" class:reach={inReach('ask', l.rank)} class:edge={hovered?.side === 'ask' && hovered.rank === l.rank} data-testid="book-ask" style:grid-row={w - l.rank} onpointerleave={() => (hovered = null)} style="--w:{((amount(l, true) / max) * 100).toFixed(1)}%" onpointerenter={(e) => hover(e, 'ask', l.rank)} onclick={(e) => (e.currentTarget.blur(), pick(rowPx(l.px, false)))}>
         <span class="num sell">{fmtRow(rowPx(l.px, false))}</span><span class="num" data-testid="book-size" title={`${amount(l)} ${sizeUnit}`}>{formatAmount(amount(l))}</span>{#if full}<span class="num dim" data-testid="book-total" title={`${amount(l, true)} ${sizeUnit}`}>{formatAmount(amount(l, true))}</span>{/if}
       </button>
     {/each}
-    {#if !asks.length || !bids.length}<div class="depth-state" role="status">Waiting for {asks.length ? 'bids' : bids.length ? 'asks' : 'market depth'}…</div>{/if}
+    {#if !asks.length || !bids.length}<div class="depth-state" style:grid-row={asks.length ? w + 2 : w} role="status">Waiting for {asks.length ? 'bids' : bids.length ? 'asks' : 'market depth'}…</div>{/if}
     <div class="spread num dim" data-testid="book-spread" bind:this={spreadRow}>
       <span>Spread</span><span>{Number.isFinite(spread) ? fmtNum(spread, options[0]?.decimals ?? 0) : '—'}</span><span>{Number.isFinite(spread) ? `${spreadPct.toFixed(3)}%` : ''}</span>
     </div>
-    {#each bids as l}
-      <button class="row bid" class:reach={inReach('bid', l.px)} class:edge={hovered?.side === 'bid' && hovered.px === l.px} data-testid="book-bid" style="--w:{((amount(l, true) / max) * 100).toFixed(1)}%" onpointerenter={(e) => hover(e, 'bid', l.px)} onclick={(e) => (e.currentTarget.blur(), pick(rowPx(l.px, true)))}>
+    {#each bids as l (l.rank)}
+      <button class="row bid" class:reach={inReach('bid', l.rank)} class:edge={hovered?.side === 'bid' && hovered.rank === l.rank} data-testid="book-bid" style:grid-row={w + 2 + l.rank} onpointerleave={() => (hovered = null)} style="--w:{((amount(l, true) / max) * 100).toFixed(1)}%" onpointerenter={(e) => hover(e, 'bid', l.rank)} onclick={(e) => (e.currentTarget.blur(), pick(rowPx(l.px, true)))}>
         <span class="num buy">{fmtRow(rowPx(l.px, true))}</span><span class="num" data-testid="book-size" title={`${amount(l)} ${sizeUnit}`}>{formatAmount(amount(l))}</span>{#if full}<span class="num dim" data-testid="book-total" title={`${amount(l, true)} ${sizeUnit}`}>{formatAmount(amount(l, true))}</span>{/if}
       </button>
     {/each}
   </div>
   {#if hovered && reach}
     <div class="reach-tip" role="tooltip" data-testid="book-reach" style:right="{innerWidth - hovered.x + 8}px" style:top="{hovered.y}px">
-      <span>Distance from Mid</span><b data-testid="book-reach-dist">{bid > 0 && ask > 0 ? `${((Math.abs(hovered.px - (bid + ask) / 2) / ((bid + ask) / 2)) * 100).toFixed(4)}%` : '—'}</b>
+      <span>Distance from Mid</span><b data-testid="book-reach-dist">{bid > 0 && ask > 0 ? `${((Math.abs(reach.px - (bid + ask) / 2) / ((bid + ask) / 2)) * 100).toFixed(4)}%` : '—'}</b>
       <span>Average Price</span><b data-testid="book-reach-avg">{fmtPx(reach.notional / reach.total, dec, isSpot(market.coin))}</b>
       <span>Total ({symOf(market.coin)})</span><b data-testid="book-reach-size">{fmtSz(reach.total, dec)}</b>
       <span>Total ({quoteOf(market.coin)})</span><b data-testid="book-reach-usd">{fmtNum(reach.notional, 0)}</b>
@@ -143,14 +143,13 @@
   .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 2px 8px 0; color: var(--dim); text-align: right; }
   .cols span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cols span:first-child { text-align: left; }
-  .ladder { flex: 1; min-height: 0; display: grid; align-content: center; overflow: hidden; contain: strict; will-change: transform; }
-  .ladder.filled { align-content: stretch; grid-template-rows: repeat(var(--rows), minmax(0, 1fr)) auto repeat(var(--rows), minmax(0, 1fr)); }
+  .ladder { flex: 1; min-height: 0; display: grid; overflow: hidden; contain: strict; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(var(--rows), minmax(0, 1fr)) auto repeat(var(--rows), minmax(0, 1fr)); }
   .row {
     display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; width: 100%; padding: 1px 8px; border-radius: 0; text-align: right;
     background: linear-gradient(to left, color-mix(in srgb, var(--sell) 7%, transparent) var(--w), transparent var(--w));
   }
   .row.bid { background: linear-gradient(to left, color-mix(in srgb, var(--buy) 7%, transparent) var(--w), transparent var(--w)); }
-  .depth-state { color: var(--dim); padding: 8px; text-align: center; }
+  .depth-state { align-self: center; color: var(--dim); padding: 8px; text-align: center; }
   .row span:first-child { text-align: left; }
   button.row:hover { outline: 1px solid var(--line); }
   .row.reach { background-color: color-mix(in srgb, var(--bright) 6%, transparent); }
@@ -163,10 +162,10 @@
     font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none;
   }
   .reach-tip b { font-weight: 400; text-align: right; color: var(--bright); }
-  .spread { display: flex; justify-content: center; gap: 24px; padding: 3px; border-block: 1px solid var(--gutter); }
+  .spread { grid-row: calc(var(--rows) + 1); display: flex; justify-content: center; gap: 24px; padding: 3px; border-block: 1px solid var(--gutter); }
   @media (max-width: 900px) {
     .ob { font-size: max(8px, calc(var(--fs) * 0.833)); }
-    .cols, .row { grid-template-columns: 1fr auto; column-gap: 6px; padding-inline: 4px; }
+    .cols, .row { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 6px; padding-inline: 4px; }
     .totals :is(.cols, .row) { grid-template-columns: 1fr 1fr 1fr; }
     .bins { padding: 0 4px; }
     .spread > :first-child { display: none; }

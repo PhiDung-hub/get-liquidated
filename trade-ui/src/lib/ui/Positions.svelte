@@ -20,6 +20,7 @@
   import SortHead from './SortHead.svelte';
   import { cardFold, cards, inFilter, Sorter, sweepOf } from './tables.svelte';
 
+  let { totalsOnly = false }: { totalsOnly?: boolean } = $props();
   const sorter = new Sorter<Position>([
     { key: 'coin', label: 'Coin', value: (p) => p.coin },
     { key: 'size', label: 'Size', value: (p) => p.szi },
@@ -86,6 +87,7 @@
   const allOpen = $derived(rows.every((p) => expanded.has(keyOf(p))));
   const toggleAll = () => (allOpen ? expanded.clear() : rows.forEach((p) => expanded.add(keyOf(p))));
   $effect(() => {
+    if (totalsOnly) return;
     cardFold.open = allOpen;
     cardFold.run = cards.current && rows.length > 1 ? toggleAll : null;
     return () => void (cardFold.run = null);
@@ -125,7 +127,7 @@
 {#snippet usd(n: number, card = false)}<span title={Math.abs(n) >= (card ? 1000 : 1e5) ? fmtUsd(n) : undefined}>{card && Math.abs(n) >= 1000 ? `${n < 0 ? '-' : ''}$${fmtCompact(Math.abs(n))}` : fmtUsdShort(n)}</span>{/snippet}
 {#snippet fundingValue(since: number | null, today: number | null, hourly: number | null, total = false)}
   {@const details = `Since open  ${fundingAmount(since)}\nToday UTC  ${fundingAmount(today)}\nEst. / hr  ${fundingAmount(hourly)}\nEst. / day  ${fundingAmount(hourly === null ? null : hourly * 24)}`}
-  <button type="button" class="funding-value num" class:buy={(since ?? 0) > 0} class:sell={(since ?? 0) < 0}
+  <button type="button" class="funding-value num" class:buy={!cards.current && (since ?? 0) > 0} class:sell={!cards.current && (since ?? 0) < 0}
     data-testid={total ? 'positions-total-funding' : 'position-funding'} data-help-detail={details}
     aria-label={`${total ? 'Total funding for open positions' : 'Position funding'}. ${details.replaceAll('\n', '. ')}`}>
     {since === null ? '—' : Math.abs(since) >= 1000 && cards.current ? `${since < 0 ? '-' : ''}$${fmtCompact(Math.abs(since))}` : since !== 0 && Math.abs(since) < 0.01 ? fundingAmount(since) : fmtUsdShort(since)}
@@ -197,11 +199,12 @@
   </b>
 {/snippet}
 
+{#if !totalsOnly}
 {#if !rows.length}
   {#if canTrade && !cards.current && (openOrders.list.length || inventory.positions.some((p) => p.szi !== 0))}<div class="sweeps">{@render closeAll()}</div>{/if}
   <p class="dim" data-testid="account-empty">{viewAddress() && !inventory.loaded ? 'Loading positions…' : inventory.positions.some((p) => p.szi !== 0) ? 'No positions match the filter.' : 'No open positions.'}</p>
 {:else if cards.current}
-  <div class="cards">
+  <div class="cards trading-rows">
     {#each rows as p (keyOf(p))}
       {@const k = keyOf(p)}
       {@const open = expanded.has(k)}
@@ -265,8 +268,10 @@
     </tfoot>
   </table>
 {/if}
-{#if openPositions.length && (cards.current || !rows.length)}
-  <div class="totals summary-grid" aria-label="All open perp positions" role="group" data-testid="positions-totals">
+{/if}
+{#if openPositions.length && (totalsOnly || (!cards.current && !rows.length))}
+  <div class="totals summary-grid" class:account-summary={totalsOnly} aria-label="All open perp positions" role="group" data-testid="positions-totals">
+    {#if totalsOnly}<h4>Open position totals</h4>{/if}
     <div><span class="total-label">Total exposure</span>{@render exposureTotal()}</div>
     <div><span class="total-label">Unrealized PnL</span>{@render pnlTotal()}</div>
     <div><span class="total-label" title="Sum of margin used by open positions">Margin used</span>{@render marginTotal()}</div>
@@ -335,6 +340,9 @@
   .account-return, .inline-total { white-space: nowrap; }
   .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
+  .account-summary { grid-template-columns: 1fr; gap: 4px; padding: 6px 8px 12px; }
+  .account-summary h4 { margin: 0 0 2px; font-size: inherit; font-weight: 500; color: var(--bright); }
+  .account-summary > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }
   .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
   .totals .funding-value { font-weight: 700; }

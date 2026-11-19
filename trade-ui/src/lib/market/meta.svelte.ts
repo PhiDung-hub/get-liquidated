@@ -1,4 +1,5 @@
 import { info } from '$lib/transport/info';
+import { strictSpotPair } from './strict';
 import { net } from '$lib/transport/network';
 import { rateLimited, socket } from '$lib/transport/ws.svelte';
 import { arr, num, optNum, str } from '$lib/util/parse';
@@ -9,7 +10,7 @@ export type MarginMode = 'normal' | 'noCross' | 'strictIsolated';
 export interface Asset {
   name: string; index: number; szDecimals: number; maxLeverage: number; onlyIsolated: boolean; isDelisted: boolean;
   dex: string; collateral: string; marginMode: MarginMode; feeScale: number; growth: boolean; tiers: Tier[]; spot: boolean;
-  base: string; fullName?: string;
+  base: string; fullName?: string; strictSpot?: boolean;
 }
 export interface Tier { lowerBound: number; maxLeverage: number }
 type Tables = Map<number, Tier[]>;
@@ -43,6 +44,7 @@ export const symOf = (coin: string) => {
   const a = meta.byName.get(coin);
   return a?.spot ? a.base : coin.slice(coin.indexOf(':') + 1);
 };
+export const strictMarket = (a: Asset) => !a.isDelisted && (a.spot ? a.strictSpot === true : !a.dex || net.isMainnet);
 export const quoteOf = (coin: string) => meta.byName.get(coin)?.collateral ?? 'USDC';
 /** Cross is refused for onlyIsolated and for any HIP-3 margin mode other than normal (stricter than HL). */
 export const isolatedOnly = (a: Asset | undefined) => !!a && (a.onlyIsolated || a.marginMode !== 'normal');
@@ -344,6 +346,7 @@ function spotAssets(m: any): Asset[] {
     return {
       name, index: 10_000 + idx, szDecimals: num(b.szDecimals, 'szDecimals'), maxLeverage: 0, onlyIsolated: false, isDelisted: false, dex: '',
       collateral: str(q.name, 'token name'), marginMode: 'normal', feeScale: 0, growth: false, tiers: [], spot: true,
+      strictSpot: strictSpotPair(b.tokenId, str(b.name, 'base name'), str(q.name, 'quote name')),
       base: str(b.name, 'token name'), fullName: typeof b.fullName === 'string' ? b.fullName : undefined
     };
   });

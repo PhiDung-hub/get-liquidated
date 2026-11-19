@@ -61,10 +61,13 @@ function orderLine(o: OpenOrder, p: Position | undefined, dec: number | undefine
   const kind = `${o.side === 'B' ? 'Buy' : 'Sell'}${!o.isTrigger ? '' : o.orderType.startsWith('Take') ? ' TP' : reduces ? ' SL' : ' Stop'}`;
   // An order on the other side of the position shows its close PnL before fees.
   const pnl = p && (o.side === 'B') !== p.szi > 0 ? Math.round((price - p.entryPx) * Math.sign(p.szi) * Math.min(sz, Math.abs(p.szi)) * 100) / 100 : undefined;
-  const est = pnl === undefined ? '' : signed(pnl);
+  const estimate = pnl === undefined ? '' : signed(pnl);
+  const move = o.isTrigger && estimate && p && p.entryPx > 0 ? fmtPct((price - p.entryPx) / p.entryPx) : '';
+  const est = move ? `${estimate} (${move})` : estimate;
   const at = `${kind} ${fmtPx(price, dec, meta.byName.get(o.coin)?.spot)}`;
   const parts = est ? [at, est, fmtSz(sz, dec)] : [at, fmtSz(sz, dec)];
-  return { key: `o${o.oid}`, kind: 'order', price, parts, buy: o.side === 'B', o, sz, tag: !o.isTrigger, est, pnl };
+  const hint = move && p ? `Estimated close PnL before fees ${estimate}. Price move from entry (${fmtPx(p.entryPx, dec)}) ${move}.` : undefined;
+  return { key: `o${o.oid}`, kind: 'order', price, parts, buy: o.side === 'B', o, sz, tag: !o.isTrigger, est, pnl, hint };
 }
 
 /** The whole-position TP (px on the profit side of mark) or SL a position-label drag would place at px. */
@@ -100,7 +103,7 @@ function linesFor(coin: string, held?: { key: string; px: number; why?: string }
   const p = found?.szi ? found : undefined;
   const at = (o: OpenOrder) => (held?.key === `o${o.oid}` ? held.px : undefined);
   const dragged = held?.key === 'position' ? 'exit' : held?.key;
-  const refused = (l: Line): Line => (!held?.why || l.key !== dragged ? l : { ...l, parts: [l.parts[0], held.why, ...l.parts.slice(l.est ? 2 : 1)], est: '', pnl: undefined, why: held.why });
+  const refused = (l: Line): Line => (!held?.why || l.key !== dragged ? l : { ...l, parts: [l.parts[0], held.why, ...l.parts.slice(l.est ? 2 : 1)], est: '', pnl: undefined, hint: undefined, why: held.why });
   const all = openOrders.list.filter((o) => o.coin === coin && !isTrailing(o)).map((o) => refused(orderLine(o, p, dec, at(o)))).sort((a, b) => b.price - a.price);
   const [tags, orders] = [all.filter((l) => l.tag), all.filter((l) => !l.tag)];
   if (!p) return [...tags, ...orders];

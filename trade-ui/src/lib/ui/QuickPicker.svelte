@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { meta, nameOf, symOf } from '$lib/market/meta.svelte';
+  import { meta, nameOf, strictMarket, symOf } from '$lib/market/meta.svelte';
   import { selectCoin } from '$lib/market/market.svelte';
   import { MAX_QUICK, settings } from '$lib/settings/settings.svelte';
   import { addQuick, moveQuick, removeQuick, topChips } from '$lib/market/views.svelte';
@@ -24,7 +24,7 @@
     const s = q.trim().toLowerCase();
     if (!s) return [];
     return [...meta.assets, ...meta.spot]
-      .filter((a) => !a.isDelisted && !bar.includes(a.name) && [a.name, nameOf(a.name)].some((w) => w.toLowerCase().includes(s)))
+      .filter((a) => strictMarket(a) && !bar.includes(a.name) && [a.name, nameOf(a.name)].some((w) => w.toLowerCase().includes(s)))
       .map((a) => ({ c: a.name, exact: symOf(a.name).toLowerCase() === s ? 1 : 0 }))
       .sort((x, y) => y.exact - x.exact || vol(y.c) - vol(x.c))
       .slice(0, 8)

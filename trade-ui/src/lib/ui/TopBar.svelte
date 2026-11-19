@@ -9,7 +9,7 @@
   import { settings, persist, DEFAULTS } from '$lib/settings/settings.svelte';
   import ThemePicker from './ThemePicker.svelte';
   import { resumeWallet, session, walletReady } from '$lib/session/session.svelte';
-  import { fmtCompact, fmtNum, fmtPct, fmtPx, pxDecimals } from '$lib/util/format';
+  import { fmtIn, fmtUsd, fmtNum, fmtPct, fmtPx, pxDecimals } from '$lib/util/format';
   import { openSettings, ui } from './state.svelte';
   import { load, save } from '$lib/util/storage';
   import Coin from './Coin.svelte';
@@ -126,9 +126,9 @@
 <button class="quick" data-testid="quick-open" aria-label="Edit quick-switch markets" title="Quick-switch markets: add, remove, reorder" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'quick'))}>★★</button>
 {/snippet}
 {#snippet more()}
-<div class="stat"><span class="dim">24h Vol</span><span class="num" data-testid="day-volume">{ctx ? (quote === 'USDC' ? `$${fmtCompact(ctx.dayNtlVlm)}` : `${fmtCompact(ctx.dayNtlVlm)} ${quote}`) : '—'}</span></div>
+<div class="stat"><span class="dim">24h Vol</span><span class="num" data-testid="day-volume">{ctx ? fmtIn(ctx.dayNtlVlm, quote) : '—'}</span></div>
 {#if !spot}
-<div class="stat"><span class="dim">OI</span><span class="num" data-testid="open-interest">{ctx?.openInterest != null ? `$${fmtCompact(ctx.openInterest * ctx.markPx)}` : '—'}</span></div>
+<div class="stat"><span class="dim">OI</span><span class="num" data-testid="open-interest">{ctx?.openInterest != null ? fmtUsd(ctx.openInterest * ctx.markPx) : '—'}</span></div>
 {/if}
 {/snippet}
 {#snippet fundingStat()}

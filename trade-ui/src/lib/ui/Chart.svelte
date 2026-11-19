@@ -191,7 +191,6 @@
   const inlineIv = $derived(pinnedIntervals.slice(0, pinCapacity).includes(settings.chart.interval));
   function fitPinnedIntervals(toolbar: HTMLDivElement) {
     void [pinnedIntervals, mobileIv.current, compact, fullscreen, showZen];
-    if (mobileIv.current) return;
     const measure = () => {
       const style = getComputedStyle(toolbar), gap = parseFloat(style.columnGap) || 0;
       const children = [...toolbar.children] as HTMLElement[];
@@ -200,7 +199,7 @@
       for (const child of fixed) {
         const css = getComputedStyle(child);
         available -= child.getBoundingClientRect().width;
-        available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
+        if (!child.classList.contains('chart-full')) available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
       }
       let count = 0;
       for (const button of children.filter((child) => child.classList.contains('iv'))) {
@@ -284,11 +283,11 @@
   let legend = $state<{ bar: Bar; vals: Record<string, string>; cols: Record<string, string>; focused: boolean }>();
   const loadCoach = () => import('./ai/ChartCoach.svelte').then((m) => m.default).catch(() => { coach.open = false; toast.error('Chart coach could not load. Reload the page and try again.'); return null; });
   const narrow = new MediaQuery('max-width: 900px');
-  const showZen = $derived(narrow.current || fullscreen);
+  const showZen = $derived(!narrow.current && fullscreen);
   // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the view controls.
   const compact = $derived(chartWidth > 0 && chartWidth < 560);
   const inlineRanges = $derived(chartWidth >= Math.max(672, 48 * settings.display.fs));
-  const room = $derived(chartWidth - (showZen ? 6 * settings.display.fs : 0) - (fullscreen ? 64 : 0));
+  const room = $derived(chartWidth - (narrow.current || showZen ? 6 * settings.display.fs : 0) - (fullscreen ? 64 : 0));
   const blocked = $derived(askBlocked());
   const toggleTool = (t: Parameters<typeof armTool>[0]) => (drawings.tool === t ? escapeChart() : armTool(t));
   type RailItem = { id: string; d: string; label: string; title: string; on?: boolean; off?: boolean; act: () => unknown; sep?: boolean };
@@ -1206,19 +1205,21 @@
   </div>
 {/snippet}
 <div class="wrap" bind:this={wrapper} class:fullscreen class:compact data-testid="chart" data-timezone={timezone} data-legend-time={legend?.bar.time ?? ''} data-crosshair={crosshair} data-scale-mode={applied.mode} data-invert={applied.invert} data-series={count} data-bars={barCount} data-price-range={priceRange} data-time-range={timeRange} data-panes={paneCount} data-cvd-bars={cvdBars} data-oid-bars={oidBars} data-flow-since={flow.now.start} data-flow-hist={flow.hist.status} data-hist-bars={flow.hist.bars.length} data-cvd-first={merged.cvd[0]?.time ?? ''} data-flow-gaps={merged.gaps.length} data-measure={measure.shown} data-studies={studiesView} data-drawings={JSON.stringify(drawings.list)} data-drawings-on={settings.chart.indicators.drawings.on} data-tool={drawings.tool ?? ''} data-selected={drawings.sel ?? ''} data-ask={annotationChat.pending?.type ?? ''} data-demo-levels={coach.lines} data-ai-marks={JSON.stringify(aiView.marks.map(({ type, label, a, b }) => ({ type, label, a, b })))}>
-  <div class="intervals" class:mobile-intervals={mobileIv.current} {@attach fitPinnedIntervals}>
+  <div class="intervals" {@attach fitPinnedIntervals}>
     {#if fullscreen}<button class="chart-coin" data-testid="chart-coin" aria-label="Markets" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'picker'))}><Coin coin={market.coin} quote="" /></button>{/if}
     {#each pinnedIntervals as i, index (i)}
-      <button class="iv" class:overflow={!mobileIv.current && index >= pinCapacity} class:mobile-pin={mobileIv.current} class:on={settings.chart.interval === i} aria-hidden={!mobileIv.current && index >= pinCapacity ? true : undefined} aria-pressed={settings.chart.interval === i} data-testid={`timeframe-pin-${i}`} onclick={(e) => (chooseInterval(i), e.currentTarget.blur())}>{ivLabel(i)}</button>
+      <button class="iv" class:overflow={index >= pinCapacity} class:mobile-pin={mobileIv.current} class:on={settings.chart.interval === i} aria-hidden={index >= pinCapacity ? true : undefined} aria-pressed={settings.chart.interval === i} data-testid={`timeframe-pin-${i}`} onclick={(e) => (chooseInterval(i), e.currentTarget.blur())}>{ivLabel(i)}</button>
     {/each}
     <span class="iv-menu" class:more={!compact && !mobileIv.current} class:on={!compact && !mobileIv.current && !inlineIv}><Menu value={settings.chart.interval} text={compact || mobileIv.current ? ivLabel(settings.chart.interval) : inlineIv ? 'More intervals' : `Interval ${ivLabel(settings.chart.interval)}`} options={ALL_INTERVALS.map((i) => ({ value: i, label: ivName(i), group: ivGroup(i), testid: `interval-${i}`, pinned: pinnedIntervals.includes(i), pinDisabled: mobileIv.current && pinnedIntervals.length >= 9 && !pinnedIntervals.includes(i) }))} onpick={(i) => chooseInterval(i as Interval)} onpin={(i) => pinInterval(i as Interval)} pinHint={mobileIv.current ? `Pin up to 9 timeframes (${pinnedIntervals.length}/9)` : 'Pinned timeframes appear as space allows'} testid="interval-menu" align="left" ariaLabel="Interval" dropdown /></span>
     <span class="tools">
       <button data-testid="compare-button" title="Compare markets on the left axis (up to 5)" aria-label={compact && room < 22.2 * settings.display.fs ? 'Compare' : null} onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'compare'))}>{compact && room < 22.2 * settings.display.fs ? '⇄' : 'Compare'}{compared().length ? ` ${compared().length}` : ''}</button>
       {#if !narrow.current && !fullscreen}<button data-testid="chart-add" disabled={settings.chart.panes.length >= MAX_PANES} title={settings.chart.panes.length >= MAX_PANES ? `At most ${MAX_PANES} extra charts` : `Open another chart beside this one (${nameOf(market.coin)}, another interval); ⇄ on it swaps it with this chart`} aria-label="Add a chart" onclick={(e) => (e.currentTarget.blur(), addPane())}>＋</button>{/if}
       <button data-testid="chart-indicators" aria-haspopup="dialog" aria-expanded={ui.overlay === 'indicators'} aria-label={compact && room < 19.3 * settings.display.fs ? 'Indicators' : null} title="Indicators ({keys('indicators')})" onclick={(e) => (e.currentTarget.blur(), toggleIndicators())}>{compact && room < 19.3 * settings.display.fs ? 'ƒx' : 'ƒx Indicators'}</button>
-      <button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>
+      {#if !narrow.current}<button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>{/if}
     </span>
-    {#if showZen}<ZenToggle />{/if}
+    {#if narrow.current}
+      <button class="chart-full" data-testid="chart-fullscreen" aria-label={fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart'} aria-pressed={fullscreen} onclick={toggleFullscreen}>{@render icon(fullscreen ? 'M2 6h4V2m6 0v4h4M2 12h4v4m6 0v-4h4' : 'M2 7V2h5m4 0h5v5M2 11v5h5m4 0h5v-5')}</button>
+    {:else if showZen}<ZenToggle />{/if}
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
   <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
@@ -1470,7 +1471,7 @@
   .tag:is([data-kind=order], [data-kind=exit]) > span:not(.grip, .pnl), .tag[data-kind=position] > span:last-of-type, .tag.fill > span:not(.pnl) { color: var(--ink); }
   .tag > * { display: flex; align-items: center; justify-content: center; padding: 0 0.45em; }
   .tag > .clip { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .tag > .est { color: var(--text); }
+  .tag > .est { align-self: center; color: var(--text); }
   .tag > .est.buy { color: var(--buy-text); }
   .tag > .est.sell { color: var(--sell-text); }
   .tag .pnl, .row .pnl { color: var(--text); }
@@ -1553,7 +1554,7 @@
   .x:disabled { opacity: 0.4; cursor: default; }
   .x:enabled:hover { color: var(--side); background: color-mix(in srgb, var(--side) 25%, transparent); }
   .intervals { flex-wrap: nowrap; }
-  .intervals.mobile-intervals { flex-wrap: wrap; }
+  .chart-full { display: grid; place-items: center; margin-inline-start: auto; min-width: 32px; min-height: 32px; }
   .intervals > * { flex-shrink: 0; }
   @media (pointer: coarse) {
     .rail { width: 40px; }
@@ -1576,6 +1577,7 @@
   }
   .compact .tools { margin-left: 4px; }
   @media (max-width: 900px) {
+    .chart-coin { max-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
     .tag .x { position: relative; }
     .tag .x::after { content: ''; position: absolute; inset: -12px -8px; }
     .wrap { overflow: hidden; }

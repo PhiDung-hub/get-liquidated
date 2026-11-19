@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { loadNotes, meta, nameOf, symOf, watchPickerPrices, type Asset } from '$lib/market/meta.svelte';
+  import { loadNotes, meta, nameOf, strictMarket, symOf, watchPickerPrices, type Asset } from '$lib/market/meta.svelte';
   import { market, selectCoin } from '$lib/market/market.svelte';
   import { MAX_COMPARE, settings, persist } from '$lib/settings/settings.svelte';
   import { fmtIn, fmtNum, fmtPct, fmtPx, fmtUsdShort, pxDecimals } from '$lib/util/format';
@@ -38,7 +38,7 @@
     return watchPickerPrices();
   });
 
-  const quotes = $derived([...new Set(meta.spot.map((a) => a.collateral))]);
+  const quotes = $derived([...new Set(meta.spot.filter(strictMarket).map((a) => a.collateral))]);
   const subs = $derived<[string, string][]>(
     tab === 'tradfi' ? TRADFI.map(([k, label]) => [k, label])
     : tab === 'hip3' ? [['', 'All'], ...meta.dexes.map((d): [string, string] => [d.name, d.name])]
@@ -55,6 +55,22 @@
     if (!isTouch()) input.focus();
   }
 
+  const metrics = [['change', '24h change'], ['volume', 'Volume'], ['oi', 'Open interest']] as const;
+  type Metric = typeof metrics[number][0];
+  let sort = $state<Metric | null>(null);
+  let descending = $state(true);
+  function sortBy(metric: Metric) {
+    descending = sort === metric ? !descending : true;
+    sort = metric;
+    rows.scrollTop = 0;
+  }
+  function metricValue(a: Asset, metric: Metric) {
+    const c = meta.ctxs.get(a.name);
+    if (!c) return null;
+    if (metric === 'volume') return c.dayNtlVlm;
+    if (metric === 'oi') return c.openInterest === null ? null : c.openInterest * c.markPx;
+    return c.prevDayPx > 0 ? (c.markPx - c.prevDayPx) / c.prevDayPx : null;
+  }
   const fav = (c: string) => Number(settings.favourites.includes(c));
   const vol = (c: string) => meta.ctxs.get(c)?.dayNtlVlm ?? 0;
   const volText = (a: Asset) => (a.spot && a.collateral !== 'USDC' ? fmtIn(vol(a.name), a.collateral) : fmtUsdShort(vol(a.name)));
@@ -70,7 +86,7 @@
     return `${diff >= 0 ? '+' : '-'}${fmtNum(Math.abs(diff), pxDecimals(c.markPx, a.szDecimals, a.spot))} / ${fmtPct(diff / c.prevDayPx)}`;
   };
   const inTab = (a: Asset) => {
-    if (tab === 'perps') return a.dex === '';
+    if (tab === 'perps') return !a.spot;
     if (tab === 'hip3') return a.dex !== '' && (!sub || a.dex === sub);
     if (tab === 'spot') return !sub || a.collateral === sub;
     if (tab === 'tradfi') return !!TRADFI.find(([k]) => k === sub)?.[2].includes(meta.notes.get(a.name)?.category ?? '');
@@ -85,11 +101,15 @@
     // Spot pairs join All ranked by volume, as on HL; the perp tabs keep to perps.
     const pool = tab === 'spot' ? meta.spot : tab === 'all' ? [...meta.assets, ...meta.spot] : meta.assets;
     return pool
-      .filter((a) => !a.isDelisted && (compare || !starredOnly || fav(a.name) > 0) && inTab(a) && !(compare && a.name === market.coin))
+      .filter((a) => strictMarket(a) && (compare || !starredOnly || fav(a.name) > 0) && inTab(a) && !(compare && a.name === market.coin))
       .map((a) => ({ a, w: words(a) }))
       .filter((r) => !s || r.w.some((w) => w.includes(s)))
-      .map(({ a, w }) => ({ a, exact: s && (symOf(a.name).toLowerCase() === s || w.includes(s)) ? 1 : 0 }))
-      .sort((x, y) => fav(y.a.name) - fav(x.a.name) || y.exact - x.exact || vol(y.a.name) - vol(x.a.name))
+      .map(({ a, w }) => ({ a, value: sort ? metricValue(a, sort) : null, exact: s && (symOf(a.name).toLowerCase() === s || w.includes(s)) ? 1 : 0 }))
+      .sort((x, y) => {
+        if (!sort) return fav(y.a.name) - fav(x.a.name) || y.exact - x.exact || vol(y.a.name) - vol(x.a.name);
+        if (x.value === null || y.value === null) return Number(x.value === null) - Number(y.value === null);
+        return descending ? y.value - x.value : x.value - y.value;
+      })
       .map((r) => r.a);
   });
   // Rows render 60 first, then 80 a frame, so opening, a tab or a keystroke paints at once; a new filter starts over.
@@ -99,7 +119,7 @@
     const f = requestAnimationFrame(() => (limit += 80));
     return () => cancelAnimationFrame(f);
   });
-  let highlightedCoin = $derived.by(() => (void [q, tab, sub, starredOnly], ''));
+  let highlightedCoin = $derived.by(() => (void [q, tab, sub, starredOnly, sort, descending], ''));
   const hi = $derived(Math.max(0, list.findIndex((a) => a.name === highlightedCoin)));
 
   function choose(coin: string) {
@@ -161,9 +181,15 @@
   {#if tab === 'spot' && meta.spotState !== 'on'}
     <p class="dim" data-testid="picker-spot-state">{meta.spotState === 'loading' ? 'Loading spot markets…' : 'Spot markets are off.'}</p>
   {/if}
+  {#snippet sortButton(key: Metric, label: string)}
+    <button class="ui-tab" class:on={sort === key} aria-label={`Sort by ${label}, ${sort === key && descending ? 'ascending' : 'descending'}`} onclick={() => sortBy(key)}>{label}{sort === key ? descending ? ' ↓' : ' ↑' : ''}</button>
+  {/snippet}
+  <nav class="mobile-sort" aria-label="Sort markets">
+    {#each metrics as [key, label]}{@render sortButton(key, label)}{/each}
+  </nav>
   <div class="rows" bind:this={rows}>
   <table>
-    <thead><tr>{#if !compare}<th></th>{/if}<th>Market</th><th class="num">Price</th><th class="num wide">24h change</th><th class="num wide">Volume</th><th class="num wide">Open interest</th></tr></thead>
+    <thead><tr>{#if !compare}<th></th>{/if}<th>Market</th><th class="num">Price</th>{#each metrics as [key, label]}<th class="num wide" aria-sort={sort === key ? descending ? 'descending' : 'ascending' : undefined}>{@render sortButton(key, label)}</th>{/each}</tr></thead>
     <tbody>
       {#each list.slice(0, limit) as a, i (a.name)}
         {@const c = meta.ctxs.get(a.name)}
@@ -208,6 +234,7 @@
   .star { display: block; background: none; padding: 0 4px; color: var(--faint); line-height: 1.2; }
   .stars { width: 1px; text-align: center; }
   th, td { padding: 4px 8px; white-space: nowrap; }
+  .mobile-sort { display: none; }
   .line2 { display: none; font-size: max(8px, calc(var(--fs) * 0.857)); }
   .star.on { color: var(--warn); }
   .tabs .star-filter { margin-left: auto; }
@@ -216,6 +243,8 @@
   tr.picked td { background: var(--surface); color: var(--bright); }
   @media (max-width: 900px) {
     .picker { top: env(safe-area-inset-top); left: 0; width: 100%; max-height: calc(92vh - env(safe-area-inset-top)); border-width: 0 0 1px; }
+    .mobile-sort { display: flex; gap: 4px; }
+    .mobile-sort button { padding: 5px 8px; }
     .wide { display: none; }
     .line2 { display: block; }
     th, td { padding: 4px; }

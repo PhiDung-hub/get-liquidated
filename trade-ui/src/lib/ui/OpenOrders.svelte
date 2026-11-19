@@ -128,16 +128,15 @@
           <span><Coin coin={o.coin} /> <b class:buy={o.side === 'B'} class:sell={o.side === 'A'}>{dirOf(o)}</b> <span class="dim">{cardType(o)}</span></span>
           <span class="time"><span class="num" class:dim={cardSort.orders === 'time'} title="{time} UTC" data-testid="order-value">{cardSort.orders === 'time' ? fmtWhen(o.timestamp) : whole(o) ? '—' : valueText(o, true)}</span>{#if !fullDetails} <button class="chevron" data-testid="order-expand" aria-expanded={open} aria-label="{open ? 'Hide' : 'Show'} {o.coin} order details" onclick={(e) => (toggle(o), e.currentTarget.blur())}>{open ? '▴' : '▾'}</button>{/if}</span>
         </div>
-        <div class="sub">
-          <span class="num">{trigger ? `Trigger ${triggerOf(o)} · ` : ''}{sizeText(o)} @ {priceOf(o)}</span>
+        <div class="grid order-fields" class:trigger>
+          <div class="field"><span class="label">Size</span><span class="value num">{sizeText(o)}</span></div>
+          <div class="field"><span class="label">Price</span><span class="value num">{priceOf(o)}</span></div>
+          {#if trigger}<div class="field"><span class="label">Trigger</span><span class="value num">{triggerOf(o)}</span></div>{/if}
           {#if canTrade}<span class="actions">{@render actions(o)}</span>{/if}
         </div>
         {#if open}
           <div class="grid">
             <div class="field"><span class="label">Time (UTC)</span><span class="value num">{time}</span></div>
-            {#if trigger}<div class="field"><span class="label">Trigger</span><span class="value num">{triggerOf(o)}</span></div>{/if}
-            <div class="field"><span class="label">Price</span><span class="value num">{priceOf(o)}</span></div>
-            <div class="field"><span class="label">Size</span><span class="value num">{sizeText(o)}</span></div>
             <div class="field"><span class="label">Value</span><span class="value num">{whole(o) ? '—' : valueText(o)}</span></div>
             <div class="field" title={margin.note}><span class="label">Margin</span><span class="value num" data-testid="order-margin">{marginText(margin)}</span></div>
             {#if o.tif && !o.isTrigger}<div class="field"><span class="label">Time in force</span><span class="value">{o.tif}</span></div>{/if}
@@ -186,8 +185,10 @@
   .chevron { min-width: 24px; min-height: 24px; padding: 0; background: none; color: var(--dim); }
   .head > span:first-child { min-width: 0; overflow-wrap: anywhere; }
   .card .actions { display: flex; justify-content: flex-end; gap: 6px; }
-  .sub { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; color: var(--bright); font-size: max(8px, calc(var(--fs) * 0.917)); }
-  .sub .actions { margin-left: auto; }
+  .card .order-fields { display: grid; grid-template-columns: repeat(2, minmax(max-content, 1fr)) auto; align-items: start; gap: 4px 8px; }
+  .order-fields.trigger { grid-template-columns: repeat(3, minmax(max-content, 1fr)); }
+  .order-fields.trigger .actions { grid-column: 1 / -1; }
+  .order-fields .actions { align-self: end; }
   .card .actions button { min-height: 28px; min-width: 0; padding: 2px 6px; font-size: 0.92em; font-weight: 500; text-decoration: none; background: none; }
   .card .edit { color: var(--bright); }
   .card .cancel { color: var(--sell-text); }

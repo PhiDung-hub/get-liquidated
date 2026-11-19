@@ -132,9 +132,9 @@
   .body :global(.pin-last tbody tr:hover > td:last-child) { background: var(--surface); }
   :where(.body) :global(.cards) { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; }
   .body :global(.cards .card) { gap: 4px; padding: 6px 10px; }
-  :where(.body) :global(.trading-rows) { gap: 0; padding: 0; }
-  .body :global(.trading-rows > .card) { background: none; border: 0; border-radius: 0; }
-  .body :global(.trading-rows > .card + .card) { border-top: 1px solid var(--line); }
+  .body :global(.trading-rows) { gap: 8px; padding: 6px 8px; }
+  .body :global(.trading-rows > .card) { background: var(--surface); border: 0; border-radius: var(--radius); }
+  .body :global(.trading-rows > .card.open) { background: color-mix(in srgb, var(--surface) 94%, var(--accent)); }
   :where(.body) :global(:where(.cards) .head) { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   :where(.body) :global(:where(.cards) .head b) { font-weight: 600; }
   :where(.body) :global(:where(.cards) .head > .num) { flex: none; white-space: nowrap; }

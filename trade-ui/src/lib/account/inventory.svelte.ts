@@ -99,8 +99,12 @@ export const freeOf = (token: string) => {
 };
 export const markOf = (p: Position) => p.positionValue / Math.abs(p.szi);
 export const fractionOfEquity = (amount: number, equity: number) => Number.isFinite(equity) && equity > 0 ? amount / equity : NaN;
+export const liqDistance = (p: Position) => {
+  const mark = markOf(p);
+  return p.liqPx && mark > 0 ? Math.abs(p.liqPx - mark) / mark : NaN;
+};
 export const liqDist = (p: Position) => {
-  const d = p.liqPx ? Math.abs(p.liqPx - markOf(p)) / markOf(p) : NaN;
+  const d = liqDistance(p);
   return !Number.isFinite(d) ? '—' : d > 10 ? '>1000%' : `${(d * 100).toFixed(1)}%`;
 };
 

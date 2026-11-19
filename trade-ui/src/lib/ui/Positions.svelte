@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { dailyFunding, FUNDING_DAY_MS } from '$lib/account/funding.svelte';
-  import { fractionOfEquity, inventory, liqDist, markOf as mark, summary, type Position } from '$lib/account/inventory.svelte';
+  import { fractionOfEquity, inventory, liqDist, liqDistance, markOf as mark, summary, type Position } from '$lib/account/inventory.svelte';
   import { isTrailing, openOrders } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
   import { listed, maintenance, meta } from '$lib/market/meta.svelte';
@@ -138,7 +138,12 @@
 {#snippet pnl(p: Position)}
   <span class="pnl"><span data-testid="position-pnl" data-help title="{fmtUsd(p.uPnl)} · {fmtPct(p.roe)} ROE · {fmtPct(fractionOfEquity(p.uPnl, equity))} of account equity">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render percentage(p.roe)}</span>)</span>
 {/snippet}
-{#snippet liq(p: Position)}{@const d = liqDist(p)}{p.liqPx ? fmtPx(p.liqPx, dec(p.coin)) : '—'}{#if p.liqPx && d !== '>1000%'}{' '}<span class="dim" data-testid="position-liq-distance">({p.liqPx < mark(p) ? '-' : '+'}{d})</span>{/if}{/snippet}
+{#snippet liq(p: Position)}
+  {@const distance = liqDistance(p)}
+  {@const d = liqDist(p)}
+  {@const tone = distance < 0.003 ? 'sell' : distance < 0.01 ? 'liq-warn' : 'dim'}
+  {p.liqPx ? fmtPx(p.liqPx, dec(p.coin)) : '—'}{#if p.liqPx && d !== '>1000%'}{' '}<span class={tone} data-testid="position-liq-distance">({p.liqPx < mark(p) ? '-' : '+'}{d})</span>{/if}
+{/snippet}
 {#snippet marginShare(amount: number)}
   {@const pct = fractionOfEquity(amount, equity) * 100}
   {#if Number.isFinite(pct)}
@@ -291,6 +296,7 @@
   .head-pnl .value { font-weight: 500; }
   .summary, .position-details { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(max-content, 1.3fr); gap: 4px 8px; align-items: start; }
   .card [data-testid='position-liq'] .value { gap: 4px; }
+  .liq-warn { color: var(--warn-text); }
   .card [data-testid='position-liq-distance'] { font-size: max(10px, 0.857em); }
   .card .field { min-width: 0; }
   .position-details, .card .field, .position-controls { border: 0; }

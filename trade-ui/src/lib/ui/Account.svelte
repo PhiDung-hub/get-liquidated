@@ -4,7 +4,6 @@
   import { inventory, summary, usdValue } from '$lib/account/inventory.svelte';
   import { openOrders, type OpenOrder } from '$lib/account/orders.svelte';
   import { session, viewAddress } from '$lib/session/session.svelte';
-  import { meta } from '$lib/market/meta.svelte';
   import { fees } from '$lib/account/fees.svelte';
   import { fmtNum, fmtUsd } from '$lib/util/format';
   import Coin from './Coin.svelte';
@@ -66,7 +65,6 @@
 
   const opening = (o: OpenOrder) => !o.reduceOnly && !o.isTrigger;
   const notional = (list: OpenOrder[]) => list.reduce((s, o) => s + o.limitPx * o.sz, 0);
-  const size = (list: OpenOrder[]) => list.reduce((s, o) => s + o.sz, 0);
 
   const exposure = $derived.by(() => {
     const coins = new Set([...inventory.positions.filter((p) => p.szi !== 0).map((p) => p.coin), ...openOrders.list.map((o) => o.coin)]);
@@ -76,10 +74,8 @@
       const buys = resting.filter((o) => o.side === 'B');
       const sells = resting.filter((o) => o.side === 'A');
       const szi = pos?.szi ?? 0;
-      const mark = pos && szi ? pos.positionValue / Math.abs(szi) : (meta.ctxs.get(coin)?.markPx ?? NaN);
-      const [long, short] = [szi + size(buys), szi - size(sells)];
-      const worst = Math.abs(long) >= Math.abs(short) ? long : short;
-      return { coin, szi, posNtl: szi * mark, buyNtl: notional(buys), sellNtl: notional(sells), worstNtl: worst * mark };
+      const posNtl = Math.sign(szi) * (pos?.positionValue ?? 0);
+      return { coin, szi, posNtl, buyNtl: notional(buys), sellNtl: notional(sells) };
     });
   });
 
@@ -124,7 +120,7 @@
     {/snippet}
     {#snippet exposureTable()}
       <table>
-        <thead><tr><th>Coin</th><th>Position</th><th class="buy">Buys</th><th class="sell">Sells</th><th><abbr title="position if every resting order fills">Worst</abbr></th></tr></thead>
+        <thead><tr><th>Coin</th><th>Position</th><th class="buy">Buys</th><th class="sell">Sells</th></tr></thead>
         <tbody>
           {#each exposure as x (x.coin)}
             <tr data-testid="exposure-row">
@@ -132,7 +128,6 @@
               <td class:buy={x.szi > 0} class:sell={x.szi < 0}>{usd(x.posNtl)}</td>
               <td class="buy">{usd(x.buyNtl)}</td>
               <td class="sell">{usd(x.sellNtl)}</td>
-              <td class:buy={x.worstNtl > 0} class:sell={x.worstNtl < 0}>{usd(Math.abs(x.worstNtl))}</td>
             </tr>
           {/each}
         </tbody>

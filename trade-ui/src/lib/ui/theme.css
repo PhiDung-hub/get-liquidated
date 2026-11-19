@@ -23,8 +23,8 @@
 :root:not([data-theme]), :root[data-theme='getliq'] {
   --bg: #111214; --panel: #161719; --surface: #1f2124; --line: #2b2d31; --gutter: #1d1e21;
   --text: #aaadb3; --bright: #eef0f4; --dim: #82858b; --faint: #65686e;
-  --buy: #2f978c; --sell: #b97876; --accent: #68e0cd; --warn: #c49a62;
-  --buy-text: #70ddc8; --sell-text: #efa4a1;
+  --accent: #68e0cd; --warn: #c49a62;
+  --buy-text: #84eddd; --sell-text: #ffa3b5;
 }
 :root[data-theme='paper'] {
   --bg: #e6e1d6; --panel: #eeeae1; --surface: #dcd6c9; --line: #c3bbac; --gutter: #ddd7cb;

@@ -59,7 +59,7 @@
     return !view || first.includes(view) ? first : [...first.slice(0, GRID - 1), view];
   });
   let direction = $state<'BUY' | 'SELL'>('BUY'), size = $state(''), currency = $state('SGD'), stop = $state(''), takeProfit = $state(''), level = $state(''), scaleTo = $state(''), scaleCount = $state(''), scaleSkew = $state('');
-  let ticketType = $state<Ticket>('market'), exitUnit = $state<'pts' | 'price'>('pts'), trailStep = $state(''), guaranteed = $state(false), sizeUnit = $state<'contracts' | 'value'>('contracts'), valueText = $state(''), skipReview = $state(false);
+  let ticketType = $state<Ticket>('market'), exitUnit = $state<'pts' | 'price'>('pts'), trailStep = $state(''), guaranteed = $state(false), sizeUnit = $state<'contracts' | 'value'>('contracts'), valueText = $state(''), skipReview = $state(false), remember = $state(false);
   const TICKETS = [['market', 'Market'], ['limit', 'Limit'], ['stop', 'Stop'], ['scale', 'Scale']] as const;
   const levels = $derived(ticketType === 'market' ? [] : level.split(/[\s,]+/).filter(Boolean).map(Number));
   const kind = $derived(selected && levels[0] > 0 ? orderKind(direction === 'BUY', levels[0], selected.market) : '');
@@ -326,12 +326,16 @@
     if (skipReview) void submit(); else review = true;
   }
   function signedOut() { connection++; browseRequest++; session = null; connected = false; views = []; active = ''; quotes = {}; positions = []; orders = []; deals = null; review = false; closing = null; editing = null; reconcile = false; setDraft(defaults(null)); }
+  let reconnecting: Promise<boolean> | null = null;
+  const reconnect = () => reconnecting ??= fetch('/api/ig/session', { credentials: 'same-origin' }).then(r => r.ok).catch(() => false).finally(() => reconnecting = null);
   async function api<T>(path: string, method = 'GET', value: unknown = undefined): Promise<T> {
     const epoch = connection;
     const response = await fetch(`/api/ig/${path}`, { method, credentials: 'same-origin', headers: value ? { 'content-type': 'application/json' } : {}, ...(value ? { body: JSON.stringify(value) } : {}) });
     let result;
     try { result = await response.json(); } catch { throw new Error('IG service is unavailable on this deployment.'); }
     if (!response.ok) {
+      // A remembered login signs in again once; nothing the failed request carried was sent, so it is not retried.
+      if (response.status === 401 && epoch === connection && path !== 'session' && await reconnect()) throw new ApiError(401, 'IG session renewed from your saved login. Nothing was sent; try again.', '');
       if (response.status === 401 && epoch === connection) { signedOut(); openLogin(); }
       if (response.status === 409 && path === 'session' && method === 'POST') { keyConfigured = false; keySetup = true; continueLogin = true; }
       throw new ApiError(response.status, typeof result.error === 'string' ? result.error : 'IG request failed', typeof result.status === 'string' ? result.status : '');
@@ -391,7 +395,7 @@
     const epoch = ++connection; browseRequest++; views = []; active = ''; positions = [];
     await run(async () => {
       let next: Session;
-      try { next = await api<Session>('session', 'POST', { identifier: identifier.trim(), password, environment }); } finally { password = ''; }
+      try { next = await api<Session>('session', 'POST', { identifier: identifier.trim(), password, environment, remember }); } finally { password = ''; }
       if (epoch !== connection) return;
       session = next;
       apiKey = ''; connected = true; login = false; notice = '';
@@ -530,6 +534,7 @@
     hotkeySizes = Object.fromEntries(Object.entries(record(load<unknown>('ig:hotkey-sizes', {}))).filter(([, value]) => validSize(value)).slice(-100)) as Record<string, string>;
     watchlist = liteList(load<unknown>('ig:watchlist', []), MAX_WATCH);
     skipReview = load<unknown>('ig:skip-review', false) === true;
+    remember = load<unknown>('ig:remember', false) === true;
     if (load<unknown>('ig:size-unit', 'contracts') === 'value') sizeUnit = 'value';
     const saved = record(load<unknown>('ig:workspace', {}));
     if (saved.layout === 'grid') layout = 'grid';
@@ -656,6 +661,7 @@
       <div class="key-status"><span>API key saved</span><button type="button" class="ui-tab" disabled={loading} onclick={() => { password = ''; error = ''; continueLogin = true; keySetup = true; }}>Change</button></div>
       <div class="login-field"><div class="field-label"><label for="ig-username">IG username</label><a href="https://www.ig.com/sg/lost-details" target="_blank" rel="noreferrer">Find my username</a></div><div class="ui-field credential-field" class:invalid={!!usernameError}><input id="ig-username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Your IG trading username" aria-describedby={usernameError ? 'ig-user-help ig-user-error' : 'ig-user-help'} aria-invalid={!!usernameError} bind:value={identifier} required /></div><p id="ig-user-help" class="field-help">Your trading username, separate from your API key and email.</p>{#if usernameError}<p id="ig-user-error" class="field-error" aria-live="polite">{usernameError}</p>{/if}</div>
       <div class="login-field"><label for="ig-password">Password</label><div class="ui-field credential-field"><input id="ig-password" type="password" autocomplete="current-password" placeholder="Your IG account password" aria-describedby="ig-password-help" bind:value={password} required /></div><p id="ig-password-help" class="field-help">The password for the IG username above.</p></div>
+      <label class="check remember"><input type="checkbox" data-testid="ig-remember" checked={remember} onchange={e => { remember = e.currentTarget.checked; save('ig:remember', remember); }} /> <span>Stay signed in on this device<small class="field-help">Keeps this login encrypted in a secure cookie for 30 days and signs in again when IG's session ends. Sign out forgets it.</small></span></label>
       {#if error}<p class="login-error" role="alert" {@attach node => node.scrollIntoView({ block: 'nearest' })}>{error}</p>{/if}
       <div class="actions"><button type="button" class="ui-tab" disabled={loading} onclick={closeLogin}>Cancel</button><button class="connect-button" disabled={loading || !keyConfigured || !identifier || !password || !!usernameError}>{loading ? 'Connecting…' : 'Connect live'}</button></div>
     </form>
@@ -746,6 +752,7 @@
   .review.sell { background: var(--sell-action); }
   .review:disabled { background: var(--surface); color: var(--dim); opacity: 1; }
   .message { flex: none; padding: 8px 12px; color: var(--warn-text); background: var(--surface); } .delivery { padding: 8px 0; overflow-wrap: anywhere; } .delivery strong { text-transform: capitalize; } .delivery p { font-size: 12px; }
+  .remember { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; } .remember small { display: block; margin-top: 2px; }
   .dialog.login-dialog { width: min(480px, 100%); padding: 24px; scroll-padding-block: 20px 100px; }
   .login-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
   .login-heading h2 { font-size: 18px; line-height: 1.4; font-weight: 600; }

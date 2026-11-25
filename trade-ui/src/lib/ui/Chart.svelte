@@ -15,16 +15,16 @@
   import { meta, nameOf, isSpot } from '$lib/market/meta.svelte';
   import { ALL_INTERVALS, MS, candleSnapshot, chartCandles, ivGroup, ivLabel, ivName, keepCandles, snapshotFrom, watchCandles, type Bar, type Interval } from '$lib/market/candles';
   import { withHistory, type Flow, type Hist } from '$lib/market/flow';
-  import { CHUNK, oldestChunk, fundingHistory, fundingValues, predictedFunding, publishedHour, type FundingHistory, type Prediction } from '$lib/market/fundingHistory';
+  import { CHUNK, oldestChunk, fundingHistory, fundingValues, publishedHour, type FundingHistory } from '$lib/market/fundingHistory';
   import { flow } from '$lib/market/watch.svelte';
-  import { MAX_PANES, settings, persist } from '$lib/settings/settings.svelte';
+  import { settings, persist } from '$lib/settings/settings.svelte';
   import { fmtCompact, fmtNum, fmtPct, fmtPx, fmtSz, pxDecimals } from '$lib/util/format';
   import { toast } from './toast.svelte';
   import { rateLimited, socket } from '$lib/transport/ws.svelte';
   import { modal, openSettings, ui } from './state.svelte';
   import { chartFont } from './display.svelte';
   import Menu from './order/Menu.svelte';
-  import { cancelLine, lineLabels, positionLines, signed, toggleGroup } from './chart/positionLines.svelte';
+  import { cancelLine, closeLine, lineLabels, positionLines, signed, toggleGroup } from './chart/positionLines.svelte';
   import { bindingsFor, keyLabel, type ActionId } from '$lib/hotkeys/keymap';
   import ZenToggle from './ZenToggle.svelte';
   import { chartTools, escapeChart, pickSelected } from './chart/tools.svelte';
@@ -133,6 +133,7 @@
   let nativeFullscreen = $state(false);
   let focused = $state(false);
   const fullscreen = $derived(nativeFullscreen || focused);
+  const fullscreenLabel = $derived(fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart');
   $effect(() => {
     ui.chartFull = fullscreen;
     return () => (ui.chartFull = false);
@@ -152,6 +153,7 @@
   });
   let chart = $state<IChartApi>();
   let chartWidth = $state(0);
+  let copilotButtonWidth = $state<number>();
   const DOCK = 'trade-ui:copilot-size';
   let dock = $state(loadStored(DOCK, { w: 0, h: 0 }));
   let grip: { x: number; y: number; w: number; h: number } | null = null;
@@ -170,16 +172,15 @@
     grip = null;
   }
   const mobileIv = new MediaQuery('(max-width: 900px), (pointer: coarse) and (max-height: 500px)');
+  const unfolded = new MediaQuery('(min-width: 600px) and (min-height: 600px)');
+  const canCompare = $derived(!mobileIv.current || unfolded.current);
+  $effect(() => {
+    if (!canCompare && ui.overlay === 'compare') ui.overlay = null;
+  });
   const pinnedIntervals = $derived(mobileIv.current ? settings.chart.pinnedIntervals : settings.chart.desktopPinnedIntervals);
   let pinCapacity = $state(0);
   let candles: ISeriesApi<'Candlestick'>;
   const chooseInterval = (interval: Interval) => { settings.chart.interval = interval; persist(); };
-  /** Another chart of this market beside the main one, on the first of these intervals no chart of it shows yet. */
-  function addPane() {
-    const shown = [settings.chart.interval, ...settings.chart.panes.filter((p) => p.coin === market.coin).map((p) => p.interval)];
-    settings.chart.panes.push({ coin: market.coin, interval: (['1h', '4h', '1d', '5m', '15m'] as Interval[]).find((i) => !shown.includes(i)) ?? '1h' });
-    persist();
-  }
   const pinInterval = (interval: Interval) => {
     const pins = pinnedIntervals;
     if (mobileIv.current && !pins.includes(interval) && pins.length >= 9) return void toast.info('Unpin a timeframe before adding another (maximum 9).');
@@ -199,7 +200,8 @@
       for (const child of fixed) {
         const css = getComputedStyle(child);
         available -= child.getBoundingClientRect().width;
-        if (!child.classList.contains('chart-full')) available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
+        if (!child.matches('.chart-full, .tools')) available -= (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
+        if (child.matches('.tools') && narrow.current) available -= 4;
       }
       let count = 0;
       for (const button of children.filter((child) => child.classList.contains('iv'))) {
@@ -247,6 +249,7 @@
   let priceH = $state(0);
   let kickLines = () => {};
   let legendH = $state(0);
+  let ohlcH = $state(0);
   $effect(() => {
     if (legendH >= 0) untrack(kickLines);
   });
@@ -287,7 +290,7 @@
   // The top bar's three widths, by the plot's own width (a desktop chart column can be narrow too) less the view controls.
   const compact = $derived(chartWidth > 0 && chartWidth < 560);
   const inlineRanges = $derived(chartWidth >= Math.max(672, 48 * settings.display.fs));
-  const room = $derived(chartWidth - (narrow.current || showZen ? 6 * settings.display.fs : 0) - (fullscreen ? 64 : 0));
+  const room = $derived(chartWidth - (narrow.current || showZen ? 6 * settings.display.fs : 0) - (narrow.current ? 0 : 32) - (fullscreen ? 64 : 0) - (copilotButtonWidth ?? 0));
   const blocked = $derived(askBlocked());
   const toggleTool = (t: Parameters<typeof armTool>[0]) => (drawings.tool === t ? escapeChart() : armTool(t));
   type RailItem = { id: string; d: string; label: string; title: string; on?: boolean; off?: boolean; act: () => unknown; sep?: boolean };
@@ -311,6 +314,18 @@
     return railItems.length * slot + 24 <= railH ? railItems.length : Math.max(0, Math.floor((railH - 6) / slot) - 1);
   });
   const openGroup = $derived(lineLabels.groups.find((g) => g.key === lineLabels.open));
+  // A tap on the position label shows its close ✕ for a while; it ignores taps for 400 ms, so the second tap of a double tap cannot close.
+  let revealed = $state(0);
+  let revealTimer: ReturnType<typeof setTimeout> | undefined;
+  function showClose() {
+    revealed = performance.now();
+    clearTimeout(revealTimer);
+    revealTimer = setTimeout(() => (revealed = 0), 4000);
+  }
+  const closeShown = (e: MouseEvent & { currentTarget: HTMLElement }) => {
+    e.currentTarget.blur();
+    if (!revealed || performance.now() - revealed >= 400) void closeLine(market.coin);
+  };
   type GroupRow = (typeof lineLabels.groups)[number]['rows'][number];
   const SORTS = { px: (r: GroupRow) => (r.o.isTrigger ? r.o.triggerPx : r.o.limitPx), sz: (r: GroupRow) => r.o.sz, pnl: (r: GroupRow) => r.pnl ?? 0, pos: (r: GroupRow) => r.projected };
   /** A view order only: # keeps each order's place in fill order, which the effects and totals are computed in. */
@@ -357,6 +372,7 @@
     if (!chartWidth) untrack(() => (lineLabels.open = ''));
   });
   let legendOpen = $state(typeof matchMedia === 'undefined' || !matchMedia('(max-width: 900px)').matches);
+  let studyActions = $state<string | null>(null);
   // Rows past the price pane would cover the volume and pane legends, so they fold into the ▾ +N count, as Hyperliquid's legend does.
   let legendBox = $state<HTMLElement>();
   let cut = $state(0);
@@ -381,38 +397,12 @@
   let rateCoin = '';
   let rateFrom = $state(0);
   let rateStatus = $state('');
-  let prediction = $state<Prediction[]>([]);
-  let predictionNote = $state('');
   const rateHour = $derived(publishedHour(now));
-  const rateMinute = $derived(Math.floor(now / 60_000));
   const spot = $derived(isSpot(market.coin));
   const ratesOn = $derived(settings.chart.studies.some((s) => DEFS[s.type].data && !s.hidden) && !spot);
   const fundingOn = $derived(settings.chart.studies.some((s) => DEFS[s.type].data === 'funding' && !s.hidden) && !spot);
   const pctRate = (v: number | null | undefined) => v == null ? '—' : `${(v * 100).toFixed(4)}%`;
   const livePremium = $derived(market.ctx?.oraclePx ? (market.ctx.markPx - market.ctx.oraclePx) / market.ctx.oraclePx : null);
-  const venueFunding = $derived([['HlPerp', 'Hyperliquid'], ['BinPerp', 'Binance'], ['BybitPerp', 'Bybit']].map(([id, name]) => ({
-    id, name, rate: prediction.find((r) => r.venue === id),
-    expired: !!prediction.find((r) => r.venue === id && r.nextTime !== null && r.nextTime <= now)
-  })));
-  const predictionFetched = $derived(prediction[0]?.fetchedAt);
-  const predictedText = $derived(venueFunding.map(({ name, rate, expired }) => `${name} ${expired ? 'awaiting update' : pctRate(rate?.rate)}${rate?.hours && !expired ? `/${rate.hours}h` : ''}`).join(' · '));
-  function fitFunding(el: HTMLElement) {
-    const box = el.closest('.chart') as HTMLElement;
-    const fit = () => {
-      if (!el.offsetHeight) return;
-      const bounds = box.getBoundingClientRect(), anchor = el.parentElement!.getBoundingClientRect();
-      const above = anchor.top - bounds.top - 14, below = bounds.bottom - anchor.bottom - 14;
-      const up = above >= below;
-      el.style.width = `${Math.min(440, bounds.width - 16)}px`;
-      el.style.maxHeight = `${Math.max(0, up ? above : below)}px`;
-      el.style.left = `${Math.max(bounds.left + 8, Math.min(anchor.left, bounds.right - el.offsetWidth - 8)) - anchor.left}px`;
-      el.style.top = `${up ? -el.offsetHeight - 6 : anchor.height + 6}px`;
-    };
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    ro.observe(box);
-    return () => ro.disconnect();
-  }
   let merged = $state.raw(withHistory(flow.now, flow.hist));
   let buy = '';
   let sell = '';
@@ -425,8 +415,8 @@
   const usdVol = (b: Bar) => `≈$${fmtCompact((b.volume * (b.high + b.low + b.close)) / 3)}`;
   const toVol = (b: Bar) => ({ time: time(b), value: b.volume, color: b.close >= b.open ? volUp : volDown });
 
-  // Hyperliquid's volume palette in its theme (--vol-up/down); the other themes keep their candle colours at 40%.
-  const volColours = () => [css('--vol-up') || css('--chart-up') + '66', css('--vol-down') || css('--chart-down') + '66'];
+  // Hyperliquid's volume palette in its theme (--vol-up/down); the other themes use their buy and sell colors at 40%.
+  const volColours = () => [css('--vol-up') || css('--buy') + '66', css('--vol-down') || css('--sell') + '66'];
   const theme = () => ({ buy, sell, decimals });
 
   // The legend's rows: each study with its effective plot styles, price-pane ones under OHLC and own-pane ones at their pane's top.
@@ -691,7 +681,6 @@
     oid?.setData(merged.oid.map((p) => ({ time: time(p), value: p.value, color: p.value < 0 ? sell : buy })));
     cvdBars = cvd ? merged.cvd.length : 0;
     oidBars = oid ? merged.oid.length : 0;
-    paneCount = chart?.panes().length ?? 1;
     readRanges();
     showLegend();
   }
@@ -774,7 +763,7 @@
     }, { capture: true, passive: false });
     const tools = chartTools(c, candles, el, () => bars, () => MS[settings.chart.interval], () => legendH + 4);
     const lines = positionLines(candles, el, () => c.timeScale().logicalToCoordinate((bars.length - 24) as Logical), () => leftWidth(c), () => legendH + 4);
-    const offCompare = compareLines(c, candles, () => bars, el, readRanges);
+    const offCompare = compareLines(c, candles, () => bars, () => canCompare, el, readRanges);
     const offAi = aiMarks(candles, el, () => market.coin, () => leftWidth(c), (t) => c.timeScale().logicalToCoordinate(timeToLogical(bars.map((b) => b.time), t, MS[settings.chart.interval]) as Logical), () => c.timeScale().options().barSpacing / 2, () => legendH + 4);
     const offDemo = demoLevels(candles, () => market.coin, readRanges);
     const offFills = fillMarkers(c, candles, el);
@@ -935,6 +924,7 @@
         insts = buildStudies(c, want, theme());
         trackPriceRanges(c);
       } else insts.forEach((k, i) => ((k.study = want[i]), styleStudy(k, theme())));
+      paneCount = c.panes().length;
       draw(true);
       drawFlow(flow.now, flow.hist);
     });
@@ -944,26 +934,6 @@
     void flow.now;
     void flow.hist;
     if (chart) untrack(drawFlowSoon);
-  });
-
-  $effect(() => {
-    const coin = market.coin;
-    void rateMinute;
-    if (!fundingOn) return;
-    let live = true;
-    untrack(() => {
-      prediction = [];
-      predictionNote = 'Loading funding estimates…';
-      predictedFunding(coin).then((rows) => {
-        if (!live) return;
-        prediction = rows;
-        predictionNote = rows.length ? '' : coin.includes(':') ? 'Not published for HIP-3 perps' : 'Not published for this coin';
-      }, (e) => {
-        if (live) predictionNote = 'Funding estimates unavailable';
-        console.warn('predicted funding not loaded', e);
-      });
-    });
-    return () => { live = false; };
   });
 
   let heal = () => {};
@@ -1163,44 +1133,34 @@
 {#snippet icon(d: string)}<svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true"><path {d} fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>{/snippet}
 {#snippet studyRow(r: (typeof rows)[number])}
   {@const flowKey = r.def.flow}
-  <div class="ind study" class:off={r.s.hidden} class:rates={!!r.def.data} data-testid="legend-study" data-id={r.s.id} data-type={r.s.type} role="group" aria-label={r.s.type} ondblclick={() => !flowKey && openStudy(r.s.id)}>
+  {@const expanded = studyActions === r.s.id}
+  {#snippet name()}
+    <span class:name={!flowKey} data-testid={flowKey ? `legend-${flowKey}` : undefined}>{r.def.short}{#if flowKey} {since(merged.first[flowKey])}{/if}</span>
+  {/snippet}
+  <div class="ind study" class:off={r.s.hidden} class:rates={!!r.def.data} data-testid="legend-study" data-id={r.s.id} data-type={r.s.type} role="group" aria-label={r.s.type} ondblclick={() => !mobileIv.current && !flowKey && openStudy(r.s.id)}>
+    {#if mobileIv.current}
+      <button class="study-toggle" data-testid="legend-study-toggle" aria-expanded={expanded} aria-label="{expanded ? 'Collapse' : 'Expand'} {r.s.type} actions" onclick={(e) => (e.detail && e.currentTarget.blur(), (studyActions = expanded ? null : r.s.id))}><span aria-hidden="true">{expanded ? '▾' : '▸'}</span>{@render name()}</button>
+    {:else}{@render name()}{/if}
     {#if flowKey}
-      <span data-testid="legend-{flowKey}">{r.def.short} {since(merged.first[flowKey])}</span>
       {#if !r.s.hidden}<b class="val" data-testid="value-{flowKey}">{legend?.vals[flowKey] ?? ''}</b>{/if}
       {#if merged.first[flowKey] === null && flow.hist.status !== 'loading'}<span class="hist" data-testid="hist-{flowKey}" title={flow.hist.note || 'not recorded for this coin'}>live only</span>{/if}
     {:else}
-      <span class="name">{r.def.short}</span>
-      {#if r.def.inputs.length && !r.def.data}<button class="inputs" data-testid="legend-inputs" title="{r.s.type} settings" onclick={(e) => (e.currentTarget.blur(), openStudy(r.s.id))}>{inputsText(r.s)}</button>{/if}
+      {#if r.def.inputs.length && !r.def.data}
+        {#if mobileIv.current}<span class="inputs" data-testid="legend-inputs">{inputsText(r.s)}</span>
+        {:else}<button class="inputs" data-testid="legend-inputs" title="{r.s.type} settings" onclick={(e) => (e.currentTarget.blur(), openStudy(r.s.id))}>{inputsText(r.s)}</button>{/if}
+      {/if}
       {#if r.def.data}<span class="hist" data-testid="rate-status">{rateStatus}</span>{/if}
       {#if !r.s.hidden}
         {#each r.def.plots as p, n}
           {#if r.plots[n].on}<b class="val" style:color={legend?.cols[`${r.s.id}-${n}`] || r.plots[n].color.slice(0, 7)} data-testid="value-{r.s.id}-{n}" title={p.title}>{legend?.vals[`${r.s.id}-${n}`] ?? '∅'}</b>{/if}
         {/each}
         {#if r.def.data && r.s.inputs.live !== 'Hide'}<span class="hist" data-testid="rate-live">Live {pctRate(r.def.data === 'funding' ? market.ctx?.funding : livePremium)}{r.def.data === 'funding' ? '/h' : ''}</span>{/if}
-        {#if r.def.data === 'funding'}
-          <details class="prediction" data-testid="funding-predicted">
-            <summary title={predictionNote || predictedText}>Venue funding</summary>
-            <div {@attach fitFunding}>
-              <strong>Current estimate for next funding</strong>
-              <span class="explain">Estimates can change before payment. Positive rates mean longs pay shorts. The chart shows settled Hyperliquid payments; Live is its current hourly rate.</span>
-              {#if predictionNote}<span>{predictionNote}</span>
-              {:else}
-                <table aria-label="Venue funding estimates"><thead><tr><th>Venue</th><th>Rate / interval</th><th>Next payment</th></tr></thead><tbody>
-                  {#each venueFunding as v (v.id)}
-                    <tr data-testid="funding-venue-{v.id}"><td>{v.name}</td><td>{#if v.rate && !v.expired}<b>{pctRate(v.rate.rate)}</b><small>{v.rate.hours ? `per ${v.rate.hours}h` : 'Interval not published'}</small>{:else}{v.expired ? 'Awaiting update' : 'Not published'}{/if}</td><td>{#if v.rate?.nextTime && !v.expired}<time datetime={new Date(v.rate.nextTime).toISOString()}>{zoneFormats.full.format(v.rate.nextTime)}</time>{:else}—{/if}</td></tr>
-                  {/each}
-                </tbody></table>
-              {/if}
-              <span class="explain">Source: Hyperliquid predicted funding feed. Refreshed every minute.{#if predictionFetched}{' '}Fetched {zoneFormats.full.format(predictionFetched)}.{/if}</span>
-            </div>
-          </details>
-        {/if}
       {/if}
     {/if}
-    <span class="acts">
+    <span class="acts" class:shown={mobileIv.current && expanded} hidden={mobileIv.current && !expanded}>
       <button data-testid="legend-eye" title={r.s.hidden ? 'Show' : 'Hide'} aria-label="{r.s.hidden ? 'Show' : 'Hide'} {r.s.type}" aria-pressed={!!r.s.hidden} onclick={(e) => (e.currentTarget.blur(), toggleStudy(r.s.id))}>{@render icon(r.s.hidden ? 'M2 9s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5zM3 15 15 3' : 'M2 9s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5zm7 2.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z')}</button>
       {#if !flowKey}<button data-testid="legend-settings" title="Settings" aria-label="{r.s.type} settings" onclick={(e) => (e.currentTarget.blur(), openStudy(r.s.id))}>{@render icon('M9 2.5 14.6 5.7v6.6L9 15.5l-5.6-3.2V5.7zM9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z')}</button>{/if}
-      <button data-testid="legend-remove" title="Remove" aria-label="Remove {r.s.type}" onclick={(e) => (e.currentTarget.blur(), removeStudy(r.s.id))}>{@render icon('M3.5 5h11M7 5V3.5h4V5m-6 0 .7 9.5h6.6L13 5M7.8 7.5v5M10.2 7.5v5')}</button>
+      <button data-testid="legend-remove" title="Remove" aria-label="Remove {r.s.type}" onclick={(e) => (e.currentTarget.blur(), (studyActions = null), removeStudy(r.s.id))}>{@render icon('M3.5 5h11M7 5V3.5h4V5m-6 0 .7 9.5h6.6L13 5M7.8 7.5v5M10.2 7.5v5')}</button>
     </span>
   </div>
 {/snippet}
@@ -1212,14 +1172,13 @@
     {/each}
     <span class="iv-menu" class:more={!compact && !mobileIv.current} class:on={!compact && !mobileIv.current && !inlineIv}><Menu value={settings.chart.interval} text={compact || mobileIv.current ? ivLabel(settings.chart.interval) : inlineIv ? 'More intervals' : `Interval ${ivLabel(settings.chart.interval)}`} options={ALL_INTERVALS.map((i) => ({ value: i, label: ivName(i), group: ivGroup(i), testid: `interval-${i}`, pinned: pinnedIntervals.includes(i), pinDisabled: mobileIv.current && pinnedIntervals.length >= 9 && !pinnedIntervals.includes(i) }))} onpick={(i) => chooseInterval(i as Interval)} onpin={(i) => pinInterval(i as Interval)} pinHint={mobileIv.current ? `Pin up to 9 timeframes (${pinnedIntervals.length}/9)` : 'Pinned timeframes appear as space allows'} testid="interval-menu" align="left" ariaLabel="Interval" dropdown /></span>
     <span class="tools">
-      <button data-testid="compare-button" title="Compare markets on the left axis (up to 5)" aria-label={compact && room < 22.2 * settings.display.fs ? 'Compare' : null} onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'compare'))}>{compact && room < 22.2 * settings.display.fs ? '⇄' : 'Compare'}{compared().length ? ` ${compared().length}` : ''}</button>
-      {#if !narrow.current && !fullscreen}<button data-testid="chart-add" disabled={settings.chart.panes.length >= MAX_PANES} title={settings.chart.panes.length >= MAX_PANES ? `At most ${MAX_PANES} extra charts` : `Open another chart beside this one (${nameOf(market.coin)}, another interval); ⇄ on it swaps it with this chart`} aria-label="Add a chart" onclick={(e) => (e.currentTarget.blur(), addPane())}>＋</button>{/if}
+      {#if canCompare}<button data-testid="compare-button" title="Compare markets on the left axis (up to 5)" aria-label={compact && room < 22.2 * settings.display.fs ? 'Compare' : null} onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'compare'))}>{compact && room < 22.2 * settings.display.fs ? '⇄' : 'Compare'}{compared().length ? ` ${compared().length}` : ''}</button>{/if}
       <button data-testid="chart-indicators" aria-haspopup="dialog" aria-expanded={ui.overlay === 'indicators'} aria-label={compact && room < 19.3 * settings.display.fs ? 'Indicators' : null} title="Indicators ({keys('indicators')})" onclick={(e) => (e.currentTarget.blur(), toggleIndicators())}>{compact && room < 19.3 * settings.display.fs ? 'ƒx' : 'ƒx Indicators'}</button>
       {#if !narrow.current}<button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>{/if}
+      {#if !noAi()}<button class="copilot-launch" bind:offsetWidth={copilotButtonWidth} data-testid="chart-copilot" title="AI co-pilot: your own Claude Code, Codex or other MCP client coaches you on this chart" aria-expanded={ui.panelTab === 'ai'} onclick={(e) => { if (e.detail) e.currentTarget.blur(); ui.panelTab = ui.panelTab === 'ai' ? 'trade' : 'ai'; }}>Co-pilot{#if agent.suggestions.length}<span>{agent.suggestions.length}</span>{/if}{#if ui.panelTab === 'ai'}<span aria-hidden="true">✕</span>{/if}</button>{/if}
     </span>
-    {#if narrow.current}
-      <button class="chart-full" data-testid="chart-fullscreen" aria-label={fullscreen ? 'Exit fullscreen chart' : 'Fullscreen chart'} aria-pressed={fullscreen} onclick={toggleFullscreen}>{@render icon(fullscreen ? 'M2 6h4V2m6 0v4h4M2 12h4v4m6 0v-4h4' : 'M2 7V2h5m4 0h5v5M2 11v5h5m4 0h5v-5')}</button>
-    {:else if showZen}<ZenToggle />{/if}
+    {#if showZen}<ZenToggle />{/if}
+    <button class="chart-full" class:on={fullscreen} data-testid="chart-fullscreen" aria-label={fullscreenLabel} aria-pressed={fullscreen} title={fullscreenLabel} onclick={toggleFullscreen}>{@render icon(fullscreen ? 'M2 6h4V2m6 0v4h4M2 12h4v4m6 0v-4h4' : 'M2 7V2h5m4 0h5v5M2 11v5h5m4 0h5v-5')}</button>
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
   <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
@@ -1249,15 +1208,15 @@
       {@const sp = legendOpen ? ' ' : ''}
       {@const hidden = priceRows.length + compareView.rows.length + (aiView.bias.length ? 1 : 0)}
       <div class="legends" class:all={legendAll} bind:this={legendBox} bind:clientHeight={legendH} style:max-height={legendAll ? `${legendRoom}px` : null} style:left="{axisL + 8}px" style:right="{axisW + 8}px">
-        <div class="ohlc" class:down={b.close < b.open} class:short={!legendOpen} class:idle={!legendOpen && !legend.focused} data-testid="chart-legend" data-time={b.time}>
+        <div class="ohlc" class:down={b.close < b.open} class:short={!legendOpen} class:idle={!legendOpen && !legend.focused} bind:clientHeight={ohlcH} data-testid="chart-legend" data-time={b.time}>
           <button class="fold" data-testid="legend-toggle" aria-expanded={legendOpen} title={legendOpen ? 'Collapse legend' : 'Expand legend'} onclick={(e) => (e.currentTarget.blur(), legendOpen && cut && !legendAll ? (legendAll = true) : ((legendOpen = !legendOpen), (legendAll = false)))}>{legendOpen ? `▾${cut ? ` +${cut}` : ''}` : `▸${hidden ? ` +${hidden}` : ''}`}</button>
-          {#if legendOpen}<span>{nameOf(market.coin)} · {ivLabel(settings.chart.interval)}</span>{/if}
+          {#if legendOpen}<span class="legend-market">{nameOf(market.coin)} · {ivLabel(settings.chart.interval)}</span>{/if}
           <span>O{sp}<b>{px(b.open)}</b></span>
           <span>H{sp}<b>{px(b.high)}</b></span>
           <span>L{sp}<b>{px(b.low)}</b></span>
           <span>C{sp}<b data-testid="legend-close">{px(b.close)}</b></span>
           <b>{#if legendOpen}{b.close >= b.open ? '+' : ''}{px(b.close - b.open)} ({fmtPct((b.close - b.open) / b.open)}){:else}{fmtPct((b.close - b.open) / b.open)}{/if}</b>
-          {#if legendOpen && !(narrow.current && settings.chart.volume)}<span>Vol <b>{fmtCompact(b.volume)}</b> <b>{usdVol(b)}</b></span>{/if}
+          {#if legendOpen && !(narrow.current && settings.chart.volume)}<span class="ohlc-volume">Vol <b>{fmtCompact(b.volume)}</b> <b>{usdVol(b)}</b></span>{/if}
           {#if legendOpen && !narrow.current}<span class="timestamp" data-testid="chart-timestamp">{zoneFormats.full.format(b.time)}</span>{/if}
         </div>
         {#each legendOpen ? priceRows : [] as r (r.s.id)}{@render studyRow(r)}{/each}
@@ -1283,8 +1242,7 @@
     {#each aiView.labels as l (l.key)}
       <button class="tag ai" data-tone={l.tone} title="Discuss this annotation" aria-label="Discuss annotation: {l.text}" onclick={() => annotationChat.markId = l.key} hidden={l.y < 0} data-testid="ai-label" data-mine={l.mine} data-key={l.key} style:left="{l.left}px" style:transform="translate3d(0,{l.y}px,0) translateY(-50%)" style:height="{aiView.height}px" style:max-width={l.max === null ? null : `min(50%, ${l.max}px)`} style:visibility={l.placed ? null : 'hidden'} bind:offsetWidth={l.w}><span>{l.text}</span></button>
     {/each}
-    {#if !noAi()}<button class="copilot-launch" data-testid="chart-copilot" title="AI co-pilot: your own Claude Code, Codex or other MCP client coaches you on this chart" aria-expanded={ui.panelTab === 'ai'} onclick={(e) => { e.currentTarget.blur(); ui.panelTab = ui.panelTab === 'ai' ? 'trade' : 'ai'; }}>Co-pilot{#if agent.suggestions.length}<span>{agent.suggestions.length}</span>{/if}{#if ui.panelTab === 'ai'}<span aria-hidden="true">✕</span>{/if}</button>{/if}
-    {#if ui.panelTab === 'ai' && !noAi()}<aside class="copilot" data-testid="copilot-dock" aria-label="AI co-pilot"><AiPanel /><span class="copilot-grip" data-testid="copilot-grip" role="presentation" title="Drag to resize, double-click to reset" onpointerdown={gripDown} onpointermove={gripMove} onpointerup={gripUp} onpointercancel={gripUp} ondblclick={() => saveDock({ w: 0, h: 0 })}></span></aside>{/if}
+    {#if ui.panelTab === 'ai' && !noAi()}<aside class="copilot" data-testid="copilot-dock" aria-label="AI co-pilot" style:--copilot-top="{Math.max(40, ohlcH + 8)}px"><AiPanel /><span class="copilot-grip" data-testid="copilot-grip" role="presentation" title="Drag to resize, double-click to reset" onpointerdown={gripDown} onpointermove={gripMove} onpointerup={gripUp} onpointercancel={gripUp} ondblclick={() => saveDock({ w: 0, h: 0 })}></span></aside>{/if}
     {#if !noAi()}<AnnotationChat time={(t) => zoneFormats.full.format(t)} {collect} dock={(p) => ((candles?.priceToCoordinate(p) ?? 0) > priceH / 2 ? 'top' : 'bottom')} />{/if}
     {#each lineLabels.groups as g (g.rows[0].key)}
       {@const open = lineLabels.open === g.key}
@@ -1300,8 +1258,8 @@
     {/each}
     {#each lineLabels.list as t (t.key)}
       {@const quiet = t.kind === 'mfe' || t.kind === 'mae'}
-      <div class="tag" class:buy={t.buy} class:fill={t.tag} class:under={t.under} class:drag={t.drag} class:quiet class:over={t.over} class:still={!t.tag && !t.drag && !(t.x && t.o)} hidden={t.y < 0 || !!t.group} title={t.hint} data-testid={quiet ? 'extreme-tag' : 'line-tag'} data-kind={t.kind} data-key={t.key} data-tag={t.o?.oid} data-group={t.group || null} style:left="{t.left}px" style:transform="translate3d(0,{t.y}px,0) translateY(-50%)" style:height="{lineLabels.size}px" style:max-width={lineLabels.max <= 0 ? null : `${t.cap || lineLabels.max}px`} bind:offsetWidth={t.w}>
-        {#if t.drag && !t.tag}<span class="grip" data-testid="line-grip" title={t.o ? 'Drag to move this order' : 'Drag to place a TP or SL'}>⋮</span>{' '}{/if}
+      <div class="tag" class:buy={t.buy} class:fill={t.tag} class:under={t.under} class:drag={t.drag} class:quiet class:over={t.over} class:still={!t.tag && !t.drag && !t.x} class:shown={t.kind === 'position' && revealed > 0} onclick={t.kind === 'position' ? showClose : undefined} hidden={t.y < 0 || !!t.group} title={t.hint} data-help={t.kind === 'liq' && t.hint ? '' : undefined} data-testid={quiet ? 'extreme-tag' : 'line-tag'} data-kind={t.kind} data-key={t.key} data-tag={t.o?.oid} data-group={t.group || null} style:left="{t.left}px" style:transform="translate3d(0,{t.y}px,0) translateY(-50%)" style:height="{lineLabels.size}px" style:max-width={lineLabels.max <= 0 ? null : `${t.cap || lineLabels.max}px`} bind:offsetWidth={t.w}>
+        {#if t.drag && !t.tag}<span class="grip" data-testid="line-grip" title={t.o ? 'Drag to move this order' : 'Drag to place or move a TP or SL'}>⋮</span>{' '}{/if}
         {#each t.parts as part, i}
           {@const est = !!t.est && part === t.est}
           {@const pnl = est || (t.kind === 'position' && i === 0)}
@@ -1310,6 +1268,8 @@
         {#if t.x && t.o}
           {@const o = t.o}
           <button class="x" data-testid="line-cancel" data-oid={o.oid} disabled={t.busy} style:width="{lineLabels.size}px" title="Cancel this order" aria-label="Cancel {o.coin} order {o.oid}" onclick={(e) => (e.currentTarget.blur(), cancelLine(o))}>✕</button>
+        {:else if t.x && t.kind === 'position'}
+          <button class="x close" data-testid="line-close" disabled={t.busy} style:width="{lineLabels.size}px" title="Close this position at market" aria-label="Close {market.coin} position at market" onclick={closeShown}>✕</button>
         {/if}
       </div>
     {/each}
@@ -1374,11 +1334,11 @@
 </div>
 
 <style>
-  .copilot-launch { position: absolute; z-index: 8; top: 8px; right: calc(var(--axis-w, 0px) + 8px); display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--dim); }
-  .copilot-launch:hover { color: var(--bright); }
-  .copilot-launch[aria-expanded='true'], .copilot-launch span { color: var(--accent); }
+  .copilot-launch { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .intervals .copilot-launch:hover, .intervals .copilot-launch[aria-expanded='true'] { background: var(--surface); color: var(--bright); }
+  .copilot-launch span { color: var(--accent); }
   .chart :global(.annotation-chat.top) { top: 40px; }
-  .copilot { position: absolute; z-index: 7; top: 40px; right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - 48px); width: min(var(--cw, 340px), calc(100% - var(--axis-w, 0px) - 16px)); height: var(--ch, auto); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .copilot { position: absolute; z-index: 7; top: var(--copilot-top); right: calc(var(--axis-w, 0px) + 8px); max-height: calc(100% - var(--copilot-top) - 8px); width: min(var(--cw, 340px), calc(100% - var(--axis-w, 0px) - 16px)); height: var(--ch, auto); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
   .chart:has(.copilot) :global(.annotation-chat) { right: min(calc(var(--axis-w, 0px) + var(--cw, 340px) + 16px), 12px + 50%); }
   .copilot-grip { position: absolute; left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; touch-action: none; border-left: 1px solid var(--dim); border-bottom: 1px solid var(--dim); border-bottom-left-radius: var(--radius); opacity: 0.5; }
   .copilot-grip:hover { opacity: 1; }
@@ -1425,7 +1385,7 @@
   .timezone:focus-within { outline: 1px solid var(--accent); }
   .timezone select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
   .timestamp { color: var(--dim); }
-  .tools { display: flex; align-items: center; gap: 2px; margin-left: 12px; color: var(--dim); }
+  .tools { display: flex; align-items: center; gap: 2px; margin-inline-start: auto; color: var(--dim); }
   .rm { min-width: 0; min-height: 0; padding: 0 4px; background: none; color: var(--dim); font: inherit; pointer-events: auto; }
   .chart { grid-area: 2 / 2; position: relative; min-width: 0; width: 100%; max-width: 100%; min-height: 0; overflow: hidden; contain: strict; }
   .chart :global(.tv-lightweight-charts) { position: relative; z-index: 0; }
@@ -1433,7 +1393,10 @@
   .ohlc, .ind { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
   .legends > * { text-shadow: 0 0 3px var(--bg), 0 0 2px var(--bg); }
   .ohlc span, .ohlc > b, .ind > * { white-space: nowrap; }
-  .ohlc.short { flex-wrap: nowrap; overflow: hidden; gap: 0 8px; }
+  .ohlc .legend-market, .ohlc .timestamp, .ohlc .ohlc-volume { min-width: 0; white-space: normal; }
+  .ohlc .legend-market { overflow-wrap: anywhere; }
+  .ohlc .ohlc-volume b { white-space: nowrap; }
+  .ohlc.short { gap: 0 8px; }
   .legends.all { overflow-y: auto; pointer-events: auto; }
   .ohlc b { font-weight: 400; color: var(--buy); }
   .fold { padding: 0 2px; background: none; border: 0; color: var(--dim); font: inherit; cursor: pointer; pointer-events: auto; }
@@ -1441,23 +1404,16 @@
   .ohlc.down b { color: var(--sell); }
   .ind { gap: 0 6px; }
   .ind .val { font-weight: 400; color: var(--bright); }
-  /* A study row takes the pointer, so hovering it shows its eye, settings and remove buttons, as on Hyperliquid; a touch screen always shows them. */
   .study { pointer-events: auto; width: fit-content; max-width: 100%; }
-  .prediction { position: relative; color: var(--dim); }
-  .prediction summary { cursor: pointer; }
-  .prediction div { position: absolute; top: 100%; left: 0; z-index: 5; display: grid; gap: 8px; width: min(440px, calc(100vw - 24px)); padding: 10px; overflow: auto; white-space: normal; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-size: max(11px, calc(var(--fs) * 0.917)); line-height: 1.4; text-shadow: none; }
-  .prediction strong { color: var(--bright); }
-  .prediction .explain { white-space: normal; }
-  .prediction th, .prediction td { padding: 5px 4px; white-space: normal; vertical-align: top; }
-  .prediction th:first-child, .prediction td:first-child { padding-left: 0; }
-  .prediction b { color: var(--bright); font-weight: 500; white-space: nowrap; }
-  .prediction small { display: block; white-space: nowrap; }
   .study .name { color: var(--text); }
-  .study .inputs { min-width: 0; min-height: 0; padding: 0; background: none; border: 0; color: var(--dim); font: inherit; cursor: pointer; }
+  .study-toggle { display: inline-flex; align-items: center; gap: 4px; min-width: 32px; min-height: 32px; padding: 0; background: none; color: var(--dim); }
+  .study .inputs { min-width: 0; min-height: 0; padding: 0; background: none; border: 0; color: var(--dim); font: inherit; }
   .study.off :is(.name, .inputs, span) { opacity: 0.5; }
   .acts { display: none; gap: 2px; align-self: center; }
-  .study:hover .acts, .study:focus-within .acts { display: inline-flex; }
+  .study:hover .acts, .study:focus-within .acts, .acts.shown { display: inline-flex; }
+  .study .acts[hidden] { display: none; }
   .acts button { display: grid; place-items: center; width: 22px; height: 18px; min-width: 0; min-height: 0; padding: 0; background: none; color: var(--dim); border-radius: var(--radius); }
+  .acts.shown button { width: 34px; height: 34px; }
   .acts button:hover { color: var(--bright); background: var(--surface); }
   .hist { color: var(--dim); }
   .fill-card { position: absolute; z-index: 5; display: grid; grid-template-columns: repeat(4, auto); gap: 1px 10px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font: max(8px, calc(var(--fs) * 0.786))/1.4 var(--mono); white-space: nowrap; pointer-events: none; }
@@ -1550,11 +1506,12 @@
   .row > * { border-top: 1px solid color-mix(in srgb, var(--side) 12%, transparent); }
   .row:first-child > * { border-top: 0; }
   .x { min-width: 0; min-height: 0; padding: 0; font: inherit; color: inherit; background: none; border: 0; border-left: 1px solid var(--line); border-radius: 0; cursor: pointer; }
-  .under .x, .row.under .x { visibility: hidden; }
+  .under .x, .row.under .x, .tag:not(:hover, .shown) > .close { visibility: hidden; }
   .x:disabled { opacity: 0.4; cursor: default; }
   .x:enabled:hover { color: var(--side); background: color-mix(in srgb, var(--side) 25%, transparent); }
   .intervals { flex-wrap: nowrap; }
-  .chart-full { display: grid; place-items: center; margin-inline-start: auto; min-width: 32px; min-height: 32px; }
+  .chart-full { display: grid; place-items: center; min-width: 32px; min-height: 32px; }
+  .intervals .chart-full:hover { background: var(--surface); color: var(--bright); }
   .intervals > * { flex-shrink: 0; }
   @media (pointer: coarse) {
     .rail { width: 40px; }
@@ -1571,18 +1528,14 @@
   .iv-menu.more.on { color: var(--bright); background: var(--surface); }
   /* A wide bar's menu shows only its caret: font-size 0 hides its text, which stays the button's accessible name. */
   .iv-menu.more :global(.menu > button) { font-size: 0; gap: 0; padding: 0 6px; }
-  @media (min-width: 901px) {
-    .ohlc:not(.short) { flex-wrap: nowrap; overflow: hidden; }
-    .ohlc .timestamp { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  }
-  .compact .tools { margin-left: 4px; }
   @media (max-width: 900px) {
+    .chart-full { margin-inline-start: auto; }
+    .tools { margin-inline-start: 4px; }
     .chart-coin { max-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
     .tag .x { position: relative; }
     .tag .x::after { content: ''; position: absolute; inset: -12px -8px; }
     .wrap { overflow: hidden; }
     .chart { margin-right: calc(-1 * var(--axis-trim, 10px)); }
-    .ohlc.short { flex-wrap: wrap; }
     /* A collapsed phone legend shows a candle's OHLC only while one is under the crosshair. */
     .ohlc.idle > :not(.fold) { display: none; }
     .chart-footer { flex-wrap: nowrap; align-items: center; gap: 0; padding: 0 4px; border-top: 0; }

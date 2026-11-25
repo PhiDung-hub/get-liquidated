@@ -476,34 +476,34 @@ export async function moveOrder(o: OpenOrder, px: number, sz = o.sz, book?: { bi
   }
 }
 
-/** Whether the coin's position already has a TP (tp) or an SL resting. */
-export function hasExit(coin: string, tp: boolean) {
-  const exit = (positionOf(coin)?.szi ?? 0) > 0 ? 'A' : 'B';
-  return openOrders.list.some((o) => o.coin === coin && o.isTrigger && !isTrailing(o) && o.side === exit && o.orderType.startsWith('Take') === tp);
+function positionExitAt(coin: string, px: number) {
+  assertPositionsLoaded();
+  assertOrdersLoaded();
+  const p = positionOf(coin);
+  if (!p?.szi) throw new Error(`no ${coin} position`);
+  const mark = markOf(coin);
+  if (Math.abs(px - mark) < tickSize(mark, asset(coin))) throw new Error('TP/SL at mark: not placed');
+  const long = p.szi > 0;
+  const tp = long ? px > mark : px < mark;
+  const orders = openOrders.list.filter((o) => o.coin === coin && o.isTrigger && !isTrailing(o) && o.side === (long ? 'A' : 'B') && o.orderType.startsWith('Take') === tp);
+  return { p, long, tp, orders };
 }
 
-/** Why a whole-position TP or SL at px would be refused, or ''. */
-export function exitRefusal(coin: string, px: number): string {
-  const p = positionOf(coin);
-  if (!p?.szi) return `no ${coin} position`;
-  let mark: number;
-  try {
-    mark = markOf(coin);
-  } catch (e) {
-    return (e as Error).message;
-  }
-  if (Math.abs(px - mark) < tickSize(mark, asset(coin))) return 'TP/SL at mark: not placed';
-  const tp = p.szi > 0 ? px > mark : px < mark;
-  return hasExit(coin, tp) ? `${coin} already has ${tp ? 'a TP' : 'an SL'}: drag that one` : '';
+/** A position drag can move a single matching reduce-only exit or add an exit when none exists. */
+export function positionExitForDrag(coin: string, px: number) {
+  const { long, tp, orders } = positionExitAt(coin, px);
+  const kind = tp ? 'TP' : 'SL';
+  const order = orders.at(0);
+  if (orders.length > 1) throw new Error(`Multiple ${kind} orders: manage them in Open orders`);
+  if (order && !order.reduceOnly) throw new Error(`Existing ${kind} is not reduce-only: manage it in Open orders`);
+  if (order) movedDraft(order, px, order.sz);
+  return { tp, order, side: long ? 'A' : 'B' };
 }
 
 /** A TP (px on the profit side of mark) or SL, a reduce-only trigger market for the whole position or for `sz` of it; refused while the position has one of that kind. */
 export async function addPositionExit(coin: string, px: number, sz?: number): Promise<boolean> {
-  const why = exitRefusal(coin, px);
-  if (why) throw new Error(why);
-  const p = positionOf(coin)!;
-  const [long, mark] = [p.szi > 0, markOf(coin)];
-  const tp = long ? px > mark : px < mark;
+  const { p, long, tp, orders } = positionExitAt(coin, px);
+  if (orders.length) throw new Error(`${coin} already has ${tp ? 'a TP' : 'an SL'}: drag that one`);
   const drafts = tpslDrafts(coin, long, sz ?? Math.abs(p.szi), tp ? px : null, tp ? null : px, settings.tpsl.slippage);
   // An unknown (dropped or 429'd post) is not an accepted exit. A sized exit stands alone; a whole-position one follows the position.
   return (await place('tpsl', coin, drafts, sz ? 'na' : 'positionTpsl')).every((e) => e.state === 'resting' || e.state === 'filled');

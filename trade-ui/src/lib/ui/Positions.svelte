@@ -54,12 +54,11 @@
   }
   const totals = $derived.by(() => {
     if (inventory.broken.length) return null;
-    let pnl = 0, margin = 0, since = 0, exposure = 0;
+    let pnl = 0, margin = 0, since = 0;
     let today: number | null = todayFunding ? 0 : null;
     let hourly: number | null = 0;
     for (const p of openPositions) {
       pnl += p.uPnl;
-      exposure += Math.abs(p.positionValue);
       margin += p.marginUsed;
       since -= p.fundingSinceOpen;
       if (today !== null) today += todayFunding?.get(p.coin) ?? 0;
@@ -68,13 +67,13 @@
         hourly = amount === null ? null : hourly + amount;
       }
     }
-    return { pnl, margin, since, today, hourly, exposure };
+    return { pnl, margin, since, today, hourly };
   });
   const fundingAmount = (n: number | null) => n === null ? '—' : Math.abs(n) > 0 && Math.abs(n) < 0.01 ? `${n < 0 ? '-' : '+'}$${fmtNum(Math.abs(n), 4)}` : `${n > 0 ? '+' : ''}${fmtUsd(n)}`;
-  const equity = $derived(summary().equity);
-  const grossExposure = $derived(inventory.loaded ? totals?.exposure ?? NaN : NaN);
-  const accountLeverage = $derived(fractionOfEquity(grossExposure, equity));
-  const accountReturn = $derived(fractionOfEquity(totals?.pnl ?? NaN, equity));
+  const { equity, grossExposure, leverage: accountLeverage } = $derived(summary());
+  const totalPnl = $derived(totals?.pnl ?? NaN);
+  const capitalBeforePnl = $derived(equity - totalPnl);
+  const accountReturn = $derived(fractionOfEquity(totalPnl, capitalBeforePnl));
   const dec = (coin: string) => meta.byName.get(coin)?.szDecimals;
   const priceTone = (p: Position) => {
     const move = (mark(p) - p.entryPx) * Math.sign(p.szi);
@@ -123,8 +122,15 @@
   }
 </script>
 
-{#snippet coinCell(p: Position)}<span class="identity"><button class="link" class:buy={p.szi > 0} class:sell={p.szi < 0} onclick={() => selectCoin(p.coin)}><Coin coin={p.coin} /></button><span class="leverage" data-testid="position-leverage">{p.leverage.value}×</span></span>{/snippet}
+{#snippet coinCell(p: Position)}<span class="identity"><button class="link" class:buy={p.szi > 0} class:sell={p.szi < 0} onclick={() => selectCoin(p.coin)}><Coin coin={p.coin} /></button><span class="leverage" data-help title="Configured leverage" data-testid="position-leverage">{p.leverage.value}×</span></span>{/snippet}
 {#snippet usd(n: number, card = false)}<span title={Math.abs(n) >= (card ? 1000 : 1e5) ? fmtUsd(n) : undefined}>{card && Math.abs(n) >= 1000 ? `${n < 0 ? '-' : ''}$${fmtCompact(Math.abs(n))}` : fmtUsdShort(n)}</span>{/snippet}
+{#snippet positionValue(p: Position, card = false)}
+  {@const leverage = p.leverage.type === 'isolated' && p.marginUsed > 0 ? Math.abs(p.positionValue) / p.marginUsed : NaN}
+  {@render usd(p.positionValue, card)}
+  {#if Number.isFinite(leverage)}
+    {' '}<span class="dim" data-help title="Effective position leverage: position value ({fmtUsd(Math.abs(p.positionValue))}) ÷ margin used ({fmtUsd(p.marginUsed)})" data-testid="position-effective-leverage">({fmtNum(leverage, 2)}×)</span>
+  {/if}
+{/snippet}
 {#snippet fundingValue(since: number | null, today: number | null, hourly: number | null, total = false)}
   {@const details = `Since open  ${fundingAmount(since)}\nToday UTC  ${fundingAmount(today)}\nEst. / hr  ${fundingAmount(hourly)}\nEst. / day  ${fundingAmount(hourly === null ? null : hourly * 24)}`}
   <button type="button" class="funding-value num" class:buy={!cards.current && (since ?? 0) > 0} class:sell={!cards.current && (since ?? 0) < 0}
@@ -138,7 +144,7 @@
 {/snippet}
 {#snippet percentage(ratio: number)}{Math.abs(ratio * 100) >= 1000 ? `${ratio < 0 ? '-' : '+'}${fmtCompact(Math.abs(ratio * 100))}%` : fmtPct(ratio)}{/snippet}
 {#snippet pnl(p: Position)}
-  <span class="pnl"><span data-testid="position-pnl" data-help title="{fmtUsd(p.uPnl)} · {fmtPct(p.roe)} ROE · {fmtPct(fractionOfEquity(p.uPnl, equity))} of account equity">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render percentage(p.roe)}</span>)</span>
+  <span class="pnl"><span data-testid="position-pnl" data-help title="{fmtUsd(p.uPnl)} · {fmtPct(p.roe)} ROE · {fmtPct(fractionOfEquity(p.uPnl, capitalBeforePnl))} of capital before uPnL">{@render usd(p.uPnl, true)}</span>{' ('}<span data-testid="position-roe">{@render percentage(p.roe)}</span>)</span>
 {/snippet}
 {#snippet liq(p: Position)}
   {@const distance = liqDistance(p)}
@@ -178,7 +184,7 @@
 
 {#snippet pnlTotal()}
   <b class="sum num" class:buy={(totals?.pnl ?? 0) > 0} class:sell={(totals?.pnl ?? 0) < 0} data-testid="positions-total-pnl">
-    {@render usd(totals?.pnl ?? NaN)} <span class="account-return" data-help title="Unrealized PnL as a share of account equity ({fmtUsd(equity)}): {fmtPct(accountReturn)}">({@render percentage(accountReturn)})</span>
+    {@render usd(totalPnl)} <span class="account-return" data-help title="Unrealized PnL as a share of capital before uPnL ({fmtUsd(capitalBeforePnl)}): {fmtPct(accountReturn)}">({@render percentage(accountReturn)})</span>
   </b>
 {/snippet}
 {#snippet marginTotal()}
@@ -193,7 +199,7 @@
 {#snippet exposureTotal()}
   <b class="sum num inline-total">
     <span data-help title="Total perp exposure {fmtUsd(grossExposure)}" data-testid="positions-total-exposure">{fmtUsdShort(grossExposure)}</span>{' '}
-    <span class="dim" data-help title="Overall account leverage: total perp exposure ({fmtUsd(grossExposure)}) divided by account equity ({fmtUsd(equity)})" data-testid="positions-account-leverage">
+    <span class="dim" data-help title="Account leverage: total perp exposure ({fmtUsd(grossExposure)}) divided by current portfolio value ({fmtUsd(equity)})" data-testid="positions-account-leverage">
       {Number.isFinite(accountLeverage) ? `(${fmtNum(accountLeverage, 2)}×)` : '—'}
     </span>
   </b>
@@ -222,7 +228,7 @@
           {#if open}
             <div class="position-details">
               <div class="field"><span class="label">Mark</span><span class="value num price mark {tone}" data-testid="position-mark">{fmtPx(mark(p), dec(p.coin))}</span></div>
-              <div class="field"><span class="label">Value</span><span class="value num">{@render usd(p.positionValue, true)}</span></div>
+              <div class="field"><span class="label">Value</span><span class="value num position-value">{@render positionValue(p, true)}</span></div>
               <div class="field margin" data-testid="position-margin"><span class="label">Margin <span class="margin-mode dim" data-testid="position-margin-mode">{p.leverage.type === 'cross' ? 'Cross' : 'Isolated'}</span></span><span class="value num">{@render margin(p, true)}</span></div>
               <div class="field"><span class="label">Funding</span><span class="value">{@render positionFunding(p)}</span></div>
               <div class="field"><span class="label">TP / SL</span><span class="value num">{@render tpsl(p, true)}</span></div>
@@ -242,7 +248,7 @@
         <tr data-testid="position-row">
           <td>{@render coinCell(p)}</td>
           <td class="num" class:buy={p.szi > 0} class:sell={p.szi < 0}>{fmtSz(p.szi, dec(p.coin))}</td>
-          <td class="num">{@render usd(p.positionValue)}</td>
+          <td class="num position-value">{@render positionValue(p)}</td>
           <td class="num price entry {tone}" data-testid="position-entry">{fmtPx(p.entryPx, dec(p.coin))}</td>
           <td class="num price mark {tone}" data-testid="position-mark">{fmtPx(mark(p), dec(p.coin))}</td>
           <td class="num" class:buy={p.uPnl >= 0} class:sell={p.uPnl < 0}>{@render pnl(p)}</td>
@@ -312,6 +318,7 @@
   .summary .label, .position-details .label, .head-pnl .label { font-size: max(10px, calc(var(--fs) * 0.857)); }
   .summary > .field > .value { font-weight: 500; }
   .card .value { display: flex; align-items: baseline; min-height: 20px; font-size: min(var(--fs), 5cqi); line-height: 20px; white-space: nowrap; overflow-wrap: normal; }
+  .card .position-value { max-width: 100%; flex-wrap: wrap; justify-content: center; column-gap: 4px; }
   .card .margin .value { flex-direction: column; align-items: flex-end; }
   .card .margin-amount { display: flex; align-items: baseline; min-height: 24px; }
   .card .margin-mode { margin-left: 4px; font-size: inherit; }
@@ -337,18 +344,18 @@
   @media (pointer: coarse) { .actions .link { min-height: 32px; } }
   tfoot td { padding-block: 12px 6px; vertical-align: top; }
   .sum { position: relative; display: inline-block; padding-top: 5px; }
-  .account-return, .inline-total { white-space: nowrap; }
+  .account-return, .inline-total, .position-value { white-space: nowrap; }
   .sum::before { content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--dim); transform: scaleY(0.5); }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12em), 1fr)); gap: 8px 12px; padding: 12px 8px 6px; }
   .account-summary { grid-template-columns: 1fr; gap: 4px; padding: 6px 8px 12px; }
   .account-summary h4 { margin: 0 0 2px; font-size: inherit; font-weight: 500; color: var(--bright); }
   .account-summary > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .total-label { display: block; margin-bottom: 2px; color: var(--dim); font-weight: 400; white-space: normal; }
-  .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; cursor: help; }
+  .funding-value { min-height: 0; min-width: 0; padding: 0; background: none; white-space: nowrap; }
   .totals .funding-value { font-weight: 700; }
   .totals .funding-value:not(.buy, .sell) { color: inherit; }
   .funding-value.buy { color: var(--buy-text); }
   .funding-value.sell { color: var(--sell-text); }
-  .margin [data-help] { cursor: default; text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
+  .margin [data-help] { text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
   .margin [data-help]:hover, :global(abbr:hover) { text-decoration-color: var(--dim); }
 </style>

@@ -22,7 +22,6 @@
   import TopBar from '$lib/ui/TopBar.svelte';
   import QuickMarkets from '$lib/ui/QuickMarkets.svelte';
   import Chart from '$lib/ui/Chart.svelte';
-  import MiniChart from '$lib/ui/chart/MiniChart.svelte';
   import BookTabs from '$lib/ui/BookTabs.svelte';
   import Trades from '$lib/ui/Trades.svelte';
   import Connection from '$lib/ui/Connection.svelte';
@@ -251,8 +250,6 @@
   });
 
   const phone = new MediaQuery('max-width: 900px');
-  /** Extra charts shown beside the main one: none on a phone. */
-  const panes = $derived(phone.current ? 0 : settings.chart.panes.length);
   const zen = $derived(inZen());
   const dex = $derived(dexOf(market.coin));
   const banner = $derived(!zen && !!dex && !settings.dismissedDexes.includes(dex));
@@ -300,14 +297,17 @@
     persist();
   }
 
-  const CHART_MIN = 320, TOP_MIN = 320, BOTTOM_MIN = 140, SUMMARY_MIN = 140;
-  let gridW = $state(0), gridH = $state(0), vh = $state(0), bannerH = $state(0);
+  const CHART_MIN = 320, TOP_MIN = 320, BOTTOM_MIN = 140, SUMMARY_MIN = 140, TALL_BOOK_MIN = 120, TALL_PANEL_MIN = 240;
+  const DESKTOP_RESERVE = 0.2, DEFAULT_BOOK = 240;
+  let gridW = $state(0), gridH = $state(0), vh = $state(0), marketBandH = $state(0);
   let sidebarH = $state(0), sidebarTradeH = $state(0), phoneH = $state(0);
   const quickCoins = $derived(topChips());
   const quickRow = $derived(!zen && quickCoins.length > 0);
   const ticketH = $derived(180 + 33 * settings.display.fs);
   const portrait = new MediaQuery('max-aspect-ratio: 3/4');
-  const tall = $derived(!phone.current && !zen && portrait.current && vh >= 1440 && (gridH + (banner ? bannerH : 0)) * 0.7 >= ticketH + Math.round(vh * 0.2));
+  const tallScreen = $derived(!phone.current && portrait.current && vh >= 1440);
+  const defaultTallBottom = $derived(Math.round(vh * 0.2));
+  const tall = $derived(tallScreen && !zen && gridH >= ticketH + TALL_BOOK_MIN + SUMMARY_MIN + defaultTallBottom);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
   // Measured on every window resize, so a size saved on a wider screen shrinks to fit without being overwritten.
   function fit(l: Layout): Layout {
@@ -316,13 +316,16 @@
       const p = clamp(panel, PANEL_MIN, cols - BOOK_MIN);
       return [clamp(book, BOOK_MIN, cols - p), p];
     };
-    const [book, panel] = widths(l.book, l.panel);
+    const defaultSide = Math.max(DEFAULT_BOOK + PANEL_MIN, Math.ceil((gridW - 2) * DESKTOP_RESERVE));
+    const defaultBook = Math.round(defaultSide * DEFAULT_BOOK / (DEFAULT_BOOK + PANEL_MIN));
+    const [book, panel] = widths(l.book || defaultBook, l.panel || defaultSide - defaultBook);
     // Tall portrait stacks the book above the ticket in one column, so only that column's width is kept.
-    const tallPanel = clamp(l.tallPanel || Math.round(gridW * 0.25), PANEL_MIN, cols);
-    const rows = gridH ? gridH - 2 - Math.max(TOP_MIN, ticketH) : Infinity;
-    const tallMid = tall ? clamp(l.tallMid || Math.round(vh * 0.18), SUMMARY_MIN, rows - BOTTOM_MIN) : l.tallMid;
-    const tallBottom = tall ? clamp(l.tallBottom || Math.round(vh * 0.2), BOTTOM_MIN, rows - tallMid) : l.tallBottom;
-    const bottom = clamp(l.bottom || Math.round(vh * 0.36), BOTTOM_MIN, gridH ? gridH - 1 - TOP_MIN : Infinity);
+    const tallPanel = clamp(l.tallPanel || Math.max(PANEL_MIN, Math.round(gridW * 0.25)), TALL_PANEL_MIN, cols);
+    const rows = gridH ? gridH - (tall ? marketBandH + 3 : 2) - Math.max(TOP_MIN, ticketH) : Infinity;
+    const defaultTallSummary = Math.min(Math.round(vh * 0.18), rows - TALL_BOOK_MIN - defaultTallBottom);
+    const tallMid = tall ? clamp(l.tallMid || defaultTallSummary, SUMMARY_MIN, rows - BOTTOM_MIN) : l.tallMid;
+    const tallBottom = tall ? clamp(l.tallBottom || defaultTallBottom, BOTTOM_MIN, rows - tallMid) : l.tallBottom;
+    const bottom = clamp(l.bottom || Math.ceil((gridH - 1) * DESKTOP_RESERVE), BOTTOM_MIN, gridH ? gridH - 1 - TOP_MIN : Infinity);
     const sidebarMin = Math.min(SUMMARY_MIN, sidebarH / 2);
     const sidebarTrade = sidebarH ? Math.floor(clamp(l.sidebarTrade || sidebarTradeH, sidebarMin, sidebarH - sidebarMin)) : l.sidebarTrade;
     const phoneReserve = phoneH < 400 ? 38 : Math.min(160, phoneH * 0.22);
@@ -338,7 +341,7 @@
   const zenOpen = $derived(settings.display.zenOpen);
   const shown = $derived({ book: !zen || zenOpen.book, panel: !zen || zenOpen.order, account: !zen || zenOpen.positions });
   const top = $derived(['chart', ...(shown.book ? ['book'] : []), ...(shown.panel ? ['panel'] : [])]);
-  const areas = $derived(tall ? "'summary summary' 'chart book' 'chart panel' 'account account'" : [top, ...(shown.account ? [top.map((a) => (a === 'panel' && !zen ? a : 'account'))] : [])].map((r) => `'${r.join(' ')}'`).join(' '));
+  const areas = $derived(tall ? "'summary summary' 'market-band market-band' 'chart book' 'chart panel' 'account account'" : [top, ...(shown.account ? [top.map((a) => (a === 'panel' && !zen ? a : 'account'))] : [])].map((r) => `'${r.join(' ')}'`).join(' '));
   const panelW = $derived(tall ? (min.book && min.trade ? 28 : lay.tallPanel) : min.trade ? 28 : lay[K.panel]);
   const columns = $derived(tall ? `minmax(0, 1fr) ${panelW}px` : top.map((a, i) => (i === 0 ? 'minmax(0, 1fr)' : `${a === 'chart' ? 28 : a === 'book' ? (min.book ? 28 : lay[K.book]) : panelW}px`)).join(' '));
   let from = DEFAULTS.display.layout;
@@ -377,14 +380,20 @@
 
 <svelte:window onhashchange={takeLink} onkeydown={tabStops} onpointerdowncapture={notePress} bind:innerHeight={vh} />
 
-<div class="app" inert={!interactive} class:zen class:banner data-zen={zen} data-testid="app" style:--toast-bottom={tall ? `${Math.max(0, gridH - summaryH) + 32 + 3 * settings.display.fs}px` : null} style:--toast-top={tall ? '8px' : null}>
-  <div class="topbar"><TopBar /></div>
+{#snippet hip3Notice()}
   {#if banner}
-    <p class="hip3" data-testid="hip3-banner" bind:offsetHeight={bannerH}>
+    <p class="hip3" data-testid="hip3-banner">
       <span>Deployed by {dex}, independently of Hyperliquid; liquidity may be thin.</span>
       <button aria-label="Dismiss for {dex}" data-testid="hip3-banner-dismiss" onclick={dismissDex}>✕</button>
     </p>
   {/if}
+{/snippet}
+
+<div class="app" inert={!interactive} class:zen class:banner={banner && !tall} data-zen={zen} data-testid="app" style:--toast-bottom={tall ? `${Math.max(0, gridH - summaryH) + 32 + 3 * settings.display.fs}px` : null} style:--toast-top={tall ? '8px' : null}>
+  <TopBar portrait={tall}>
+  {#snippet children(header, pinnedMarkets, marketSummary)}
+  <div class="topbar">{@render header()}</div>
+  {#if !tall}{@render hip3Notice()}{/if}
   {#if zen}
     <ZenStrip />
   {/if}
@@ -421,12 +430,14 @@
   {:else}
     <main
       class="grid" class:tall bind:clientWidth={gridW} bind:clientHeight={gridH}
-      style:grid-template-columns={columns} style:grid-template-rows={tall ? `${summaryH}px ${min.book ? 'auto minmax(0, 1fr)' : 'minmax(120px, 1fr) minmax(0, auto)'} ${bottomH}px` : shown.account ? `minmax(0, 1fr) ${bottomH}px` : 'minmax(0, 1fr)'} style:grid-template-areas={areas}
+      style:grid-template-columns={columns} style:grid-template-rows={tall ? `${summaryH}px auto ${min.book ? 'auto minmax(0, 1fr)' : `minmax(${TALL_BOOK_MIN}px, 1fr) minmax(0, auto)`} ${bottomH}px` : shown.account ? `minmax(0, 1fr) ${bottomH}px` : 'minmax(0, 1fr)'} style:grid-template-areas={areas}
     >
-      <section class="chart charts" class:multi={panes > 0} data-testid="charts">
-        <div class="main" style:grid-row="1 / span {Math.max(1, panes)}"><Chart /></div>
-        {#if panes}{#each settings.chart.panes as _, i (i)}<MiniChart index={i} />{/each}{/if}
-      </section>
+      {#if tall}<div class="market-band" bind:offsetHeight={marketBandH}>
+        {@render pinnedMarkets()}
+        {@render hip3Notice()}
+        {@render marketSummary()}
+      </div>{/if}
+      <section class="chart" data-testid="charts"><Chart /></section>
       <section class="book" class:shut={!shown.book}>{#if shown.book}<BookTabs flat={tall && !min.trade} />{/if}</section>
       <section class="panel" class:shut={!shown.panel} class:folded={settings.display.minimized.trade} class:flat={tall && !min.book} bind:clientHeight={sidebarH}>
         <div class="trade-section" class:minimized={settings.display.minimized.trade} bind:clientHeight={sidebarTradeH} style:flex={!tall && !min.trade && settings.display.layout.sidebarTrade ? `0 0 ${lay.sidebarTrade}px` : null}>
@@ -447,7 +458,7 @@
       </section>
       <section class="account" class:shut={!shown.account}><AccountTabs /></section>
       {#if !zen}
-        {@const band = tall ? `top: ${summaryH + 1}px; bottom: ${bottomH + 1}px; ` : 'top: 0; '}
+        {@const band = tall ? `top: ${summaryH + marketBandH + 2}px; bottom: ${bottomH + 1}px; ` : 'top: 0; '}
         {#if !tall && !settings.display.minimized.book}<Divider axis="x" label="Resize order book" value={lay[K.book]} style="right: {lay[K.book] + panelW - 2}px; bottom: {bottomH + 1}px; {band}" start={begin} move={(d) => resize({ [K.book]: from[K.book] - d })} end={persist} reset={() => reset(K.book)} />{/if}
         {#if panelW > 28}<Divider axis="x" label="Resize order book and order panel" value={lay[K.panel]} style="{band}right: {panelW - 3}px" start={begin} move={tall ? (d) => resize({ tallPanel: from.tallPanel - d }) : split} end={persist} reset={() => reset(K.panel)} />{/if}
         {#if !settings.display.minimized.positions}<Divider axis="y" label="Resize account tabs" value={lay[K.bottom]} style="bottom: {lay[K.bottom] - 3}px; right: {tall ? 0 : panelW + 1}px" start={begin} move={(d) => resize({ [K.bottom]: from[K.bottom] - d })} end={persist} reset={() => reset(K.bottom)} />{/if}
@@ -455,6 +466,8 @@
       {/if}
     </main>
   {/if}
+  {/snippet}
+  </TopBar>
   {#if !phone.current && !zen}<StatusBar />{/if}
   {#if !ui.chartFull}<Toasts />{/if}
   <Fx />
@@ -462,6 +475,15 @@
   {#if !ui.chartFull && (ui.overlay === 'picker' || ui.overlay === 'compare')}<MarketPicker compare={ui.overlay === 'compare'} />{/if}
   {#if ui.overlay === 'interval'}<IntervalPicker />{/if}
   {#if ui.overlay === 'quick'}<QuickPicker />{/if}
+  {#if ui.overlay === 'marketFunding'}
+    <dialog class="market-funding-dialog" aria-label="{nameOf(market.coin)} funding history"
+      {@attach (dialog) => { dialog.showModal(); return () => dialog.close(); }}
+      onkeydown={(e) => { if (e.key === 'Escape') e.stopPropagation(); }}
+      onclose={() => { if (ui.overlay === 'marketFunding') ui.overlay = null; }}>
+      <header><strong>{nameOf(market.coin)} Funding History</strong><button class="ui-tab" aria-label="Close funding history" onclick={(e) => e.currentTarget.closest('dialog')?.close()}>✕</button></header>
+      <MarketFunding />
+    </dialog>
+  {/if}
   {#if ui.overlay === 'help'}{#await lazy.help() then Help}<Help activate={activateAction} />{:catch}{/await}{/if}
   {#if ui.overlay === 'migration'}{#await lazy.migration() then Migration}<Migration />{:catch}{/await}{/if}
   {#if ui.overlay === 'settings'}{#await lazy.settings() then Settings}<Settings />{:catch}{/await}{/if}
@@ -481,6 +503,9 @@
 </div>
 
 <style>
+  .market-funding-dialog { width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); }
+  .market-funding-dialog::backdrop { background: #0009; }
+  .market-funding-dialog > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 0 8px 6px; }
   .app {
     display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); height: 100vh;
     padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -492,10 +517,8 @@
   .hip3 { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 0; padding: 3px 12px; border-bottom: 1px solid var(--line); color: var(--warn); font-size: max(8px, calc(var(--fs) * 0.917)); }
   .hip3 button { background: none; color: var(--dim); padding: 0 4px; }
   section { background: var(--panel); min-width: 0; min-height: 0; overflow: auto; }
+  .market-band { grid-area: market-band; min-width: 0; background: var(--panel); }
   .chart { grid-area: chart; overflow: hidden; }
-  .charts { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(0, 1fr); gap: 1px; background: var(--line); }
-  .charts.multi { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  .charts .main { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
   .book { grid-area: book; display: flex; flex-direction: column; }
   .panel { grid-area: panel; position: relative; display: flex; flex-direction: column; overflow: hidden; }
   .trade-section { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
@@ -514,10 +537,6 @@
   .tall .trade-section { grid-area: panel; background: var(--panel); overflow: hidden; }
   .tall .account-summary { grid-area: summary; background: var(--panel); border-top: 0; min-height: 0; }
   .tall .summary-body { flex: 1 1 0; }
-  .tall .summary-body :global(.account-block) { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18em), 1fr)); align-items: start; gap: 14px 16px; }
-  .tall .summary-body :global(.account-block > *) { min-width: 0; }
-  .tall .summary-body :global(.account-block :is(h4, section)) { margin-top: 0; }
-  .tall .summary-body :global(.account-block p) { contain: inline-size; }
   .folded .minimize { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; margin: 0; padding: 7px 2px; border-bottom: 0; }
   .fold-label { writing-mode: vertical-rl; white-space: nowrap; }
   .flat .minimize { flex-direction: row; padding: 5px 8px; }

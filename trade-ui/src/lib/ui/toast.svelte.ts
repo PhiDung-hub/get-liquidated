@@ -44,8 +44,8 @@ export const toast = {
   },
   info: (t: string, side?: Side) => void push('info', t, side),
   error: (t: string, side?: Side) => void push('error', t, side),
-  /** No expiry; removed by the returned function or the dismiss control. */
-  sticky: (t: string) => push('info', t, undefined, null),
+  /** No expiry; removed by the returned function, the dismiss control or its action. */
+  sticky: (t: string, action?: Toast['action']) => push('info', t, undefined, null, action),
   /** Its button runs once and drops the toast. */
   act: (kind: Toast['kind'], t: string, label: string, run: () => void) => void push(kind, t, undefined, 8000, { label, run }),
   /** One error toast per order group, updated in place (kept while `sticky`); Dismiss holds while it stays sticky with the same `definite` failures. Once the group has no error its toast goes. */

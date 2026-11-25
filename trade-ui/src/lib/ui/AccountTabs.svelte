@@ -99,6 +99,7 @@
   .body[hidden] { display: none; }
   .minimize { background: none; color: var(--dim); padding: 7px 12px; }
   .body { flex: 1; min-height: 0; overflow: auto; }
+  .body:has(> :global(.fills-table)) { scrollbar-gutter: stable; }
   .empty { padding: 12px; margin: 0; }
   :global(.account table) { width: 100%; font-size: max(8px, calc(var(--fs) * 0.917)); }
   :global(.account th) { padding: 5px 8px; white-space: nowrap; position: sticky; top: 0; background: var(--panel); }
@@ -134,7 +135,7 @@
   .body :global(.cards .card) { gap: 4px; padding: 6px 10px; }
   .body :global(.trading-rows) { gap: 8px; padding: 6px 8px; }
   .body :global(.trading-rows > .card) { background: var(--surface); border: 0; border-radius: var(--radius); }
-  .body :global(.trading-rows > .card.open) { background: color-mix(in srgb, var(--surface) 94%, var(--accent)); }
+  .body :global(.trading-rows > .card.open) { background: color-mix(in srgb, var(--surface) 95%, var(--bright)); }
   :where(.body) :global(:where(.cards) .head) { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   :where(.body) :global(:where(.cards) .head b) { font-weight: 600; }
   :where(.body) :global(:where(.cards) .head > .num) { flex: none; white-space: nowrap; }

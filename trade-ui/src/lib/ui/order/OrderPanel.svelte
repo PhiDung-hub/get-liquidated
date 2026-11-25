@@ -489,7 +489,7 @@
         <span class="tif">
           <span class="tif-help" role="group" onpointerenter={() => tifHelpOpen = true} onpointerleave={() => tifHelpOpen = false}>
             <button type="button" class="help" data-testid="panel-tif-help" aria-label="About time in force" aria-describedby={tifHelpOpen ? tifHelpId : undefined} onfocus={() => tifHelpOpen = true} onblur={() => tifHelpOpen = false} onclick={() => tifHelpOpen = true} onkeydown={(e) => { if (e.key === 'Escape') { tifHelpOpen = false; e.stopPropagation(); } }}>
-              TIF <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" /><path d="M8 7v4M8 4.5v.5" stroke="currentColor" stroke-width="1.5" /></svg>
+              TIF
             </button>
             {#if tifHelpOpen}<span class="tif-tip" role="tooltip" id={tifHelpId} data-testid="panel-tif-help-tooltip"><strong>{selectedTif.label} <span>· Time in force</span></strong><span>{selectedTif.description}</span></span>{/if}
           </span>
@@ -544,6 +544,7 @@
 
   .panel {
     --ctl: max(32px, calc(var(--fs) * 2.4));
+    container: order-ticket / inline-size;
     display: flex; flex-direction: column; padding: 8px;
     font-family: var(--sans); font-size: var(--fs); font-weight: 400; font-variant-numeric: tabular-nums; color: var(--text);
   }
@@ -584,7 +585,7 @@
   .check input:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
   .tif { position: relative; display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .tif-help { display: inline-flex; }
-  .help { display: inline-flex; align-items: center; gap: 4px; padding: 0; background: none; color: var(--dim); cursor: pointer; }
+  .help { padding: 0; background: none; color: var(--dim); }
   .help:hover, .help:focus-visible { color: var(--bright); }
   .tif-tip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 6; width: min(260px, calc(100vw - 32px)); display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 20px #0005; color: var(--text); font-size: max(12px, var(--fs)); line-height: 1.5; white-space: normal; }
   .tif-tip strong { color: var(--accent); }
@@ -604,10 +605,17 @@
   .submit.connect, .submit.enable { background: var(--accent); color: var(--bg); }
   .submit.readonly { background: var(--surface); color: var(--dim); }
   .submit.ready { background: var(--buy); color: var(--bg); }
-  .submit.ready.sell { background: var(--sell); }
+  .submit.ready.sell { background: var(--sell-action); }
   .err { color: var(--sell); }
   .warn { color: var(--warn); }
   hr { width: 100%; margin: 0; border: 0; border-top: 1px solid var(--line); }
+  @container order-ticket (max-width: 260px) {
+    .acct { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .acct button { min-width: 0; padding-inline: 6px; }
+    .two { grid-template-columns: minmax(0, 1fr); }
+    .panel :global(.field) { padding-inline: 6px; }
+    .panel :global(.field .label) { min-width: 0; white-space: normal; line-height: 1.1; }
+  }
   @media (max-width: 900px) {
     .panel { --ctl: max(40px, calc(var(--fs) * 2.4)); }
     .acct { grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; }

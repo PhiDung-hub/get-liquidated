@@ -6,7 +6,7 @@
   --bg: #0f1a1e; --panel: #0f1a1f; --surface: #273035; --line: #273035; --gutter: #18252b;
   --text: #c8d2d4; --bright: #e5edec; --dim: #9aa3a4; --faint: #9aa3a4;
   --buy: #50d2c1; --sell: #ed7088; --accent: #50d2c1; --warn: #f3c96b;
-  --buy-text: var(--buy); --sell-text: var(--sell); --warn-text: var(--warn);
+  --buy-text: var(--buy); --sell-text: var(--sell); --sell-action: var(--sell); --warn-text: var(--warn);
   --ai-term: #7aa2f7; --ai-mark: #b39df3; --ai-ticket: #e8c468; --ai-advice: #f08f55; --ai-why: #86cdf5;
   --chart-up: #26a69a; --chart-down: #ef5350; --chart-axis: #b2b5be;
   --vol-up: #22ab9480; --vol-down: #f7525f80;
@@ -24,7 +24,8 @@
   --bg: #111214; --panel: #161719; --surface: #1f2124; --line: #2b2d31; --gutter: #1d1e21;
   --text: #aaadb3; --bright: #eef0f4; --dim: #82858b; --faint: #65686e;
   --accent: #68e0cd; --warn: #c49a62;
-  --buy-text: #84eddd; --sell-text: #ffa3b5;
+  --sell: var(--chart-down); --sell-action: #ed7088;
+  --buy-text: #84eddd; --sell-text: #f69391;
 }
 :root[data-theme='paper'] {
   --bg: #e6e1d6; --panel: #eeeae1; --surface: #dcd6c9; --line: #c3bbac; --gutter: #ddd7cb;
@@ -43,8 +44,11 @@
   --mono: var(--sans);
 }
 :root:not([data-theme]), :root[data-theme='getliq'], :root[data-theme='paper'], :root[data-theme='bloomberg'] {
-  --chart-up: var(--buy); --chart-down: var(--sell); --chart-axis: var(--dim);
+  --chart-axis: var(--dim);
   --vol-up: initial; --vol-down: initial;
+}
+:root[data-theme='paper'], :root[data-theme='bloomberg'] {
+  --chart-up: var(--buy); --chart-down: var(--sell);
 }
 * { box-sizing: border-box; }
 /* Chromium and Safari take the pseudo-elements (and ignore them once the standard properties are set); Firefox takes the standard ones. */
@@ -58,6 +62,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 button, input, select, textarea { font: inherit; color: inherit; }
 button { background: var(--surface); border: 0; border-radius: var(--radius); padding: 4px 8px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
+:is(abbr, [data-help]):is([title], [data-help-text]):not(:disabled),
+[data-help-detail]:not(:disabled) { cursor: pointer; }
 input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px; min-width: 0; }
 select { appearance: none; padding-right: 26px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%239aa3a4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; background-size: 12px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

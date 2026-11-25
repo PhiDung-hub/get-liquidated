@@ -186,7 +186,7 @@
 
 <div class="scrim" role="presentation" onclick={close}></div>
 <div class="modal" role="dialog" data-sheet aria-modal="true" aria-label="Position TP/SL" data-testid="position-tpsl-modal">
-  <header><h3>Take Profit / Stop Loss</h3><span class="how" data-help data-testid="position-tpsl-how" title={`Exits are reduce-only trigger market orders. With Size blank a new exit covers the whole position and follows it as it changes; a size places it for that much only, and resizes an exit that already has its own size. Existing exits keep their order type. A blank price leaves an exit unchanged; remove exits in Open orders.\n\nPositive values mean profit for TP and loss for SL; negative values reverse that direction. ROE uses entry margin at ${leverage}× leverage. PnL targets are before fees; the preview subtracts closing fees. Funding and slippage are excluded.`}>How it works <span aria-hidden="true">ⓘ</span></span><button class="x" aria-label="Close TP/SL" disabled={busy} onclick={close}>✕</button></header>
+  <header><h3>Take Profit / Stop Loss</h3><span class="how" data-help data-testid="position-tpsl-how" title={`Exits are reduce-only trigger market orders. With Size blank a new exit covers the whole position and follows it as it changes; a size places it for that much only, and resizes an exit that already has its own size. Existing exits keep their order type. A blank price leaves an exit unchanged; remove exits in Open orders.\n\nPositive values mean profit for TP and loss for SL; negative values reverse that direction. ROE uses entry margin at ${leverage}× leverage. PnL targets are before fees; the preview subtracts closing fees. Funding and slippage are excluded.`}>How it works</span><button class="x" aria-label="Close TP/SL" disabled={busy} onclick={close}>✕</button></header>
   <div class="position"><Coin {coin} /><span class:buy={long} class:sell={!long}>{long ? 'Long' : 'Short'} {Math.abs(size)}</span></div>
   <div class="prices">
     <span class="dim">Entry price</span><span>{entry ? fmtPx(entry, d) : '—'}</span>
@@ -238,7 +238,7 @@
   .estimate > :nth-child(even) { text-align: right; }
   .dim, .how { color: var(--dim); }
   h3 { margin-right: auto; }
-  .how { font-size: max(8px, calc(var(--fs) * 0.917)); cursor: help; white-space: nowrap; }
+  .how { font-size: max(8px, calc(var(--fs) * 0.917)); white-space: nowrap; }
   .changes { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); font-size: max(8px, calc(var(--fs) * 0.917)); }
   .err { color: var(--sell); }
   .actions { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }

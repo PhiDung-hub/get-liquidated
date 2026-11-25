@@ -5,10 +5,10 @@ export interface Position {
   coin: string; dex: string; szi: number; entryPx: number; positionValue: number; uPnl: number; roe: number;
   liqPx: number | null; marginUsed: number; leverage: { type: 'cross' | 'isolated'; value: number }; fundingSinceOpen: number;
 }
-export interface Balance { coin: string; total: number; hold: number; spotHold: number | null; supplied: number; ltv: number; entryNtl: number }
+export interface Balance { coin: string; total: number; hold: number; spotHold: number | null; supplied: number; entryNtl: number }
 export interface DexState {
   dex: string; accountValue: number; marginUsed: number; totalNtl: number; withdrawable: number;
-  crossValue: number; crossNtl: number; crossMmu: number; isolatedMargin: number;
+  crossValue: number; crossMmu: number; isolatedMargin: number;
 }
 type Mode = 'portfolioMargin' | 'unifiedAccount' | 'standard';
 
@@ -35,7 +35,7 @@ function parseDex(dex: string, s: any) {
   const state: DexState = {
     dex, accountValue: num(s.marginSummary.accountValue, 'accountValue'), marginUsed: num(s.marginSummary.totalMarginUsed, 'totalMarginUsed'),
     totalNtl: num(s.marginSummary.totalNtlPos, 'totalNtlPos'), withdrawable: num(s.withdrawable, 'withdrawable'),
-    crossValue: num(s.crossMarginSummary?.accountValue ?? 0, 'crossAccountValue'), crossNtl: num(s.crossMarginSummary?.totalNtlPos ?? 0, 'crossNtlPos'),
+    crossValue: num(s.crossMarginSummary?.accountValue ?? 0, 'crossAccountValue'),
     crossMmu: num(s.crossMaintenanceMarginUsed ?? 0, 'crossMaintenanceMarginUsed'),
     isolatedMargin: positions.reduce((t, p) => (p.leverage.type === 'isolated' ? t + p.marginUsed : t), 0)
   };
@@ -83,7 +83,7 @@ export function applySpot(d: any) {
   const s = d.spotState;
   const balances = arr<any>(s?.balances, 'balances').map((b) => ({
     coin: str(b.coin, 'coin'), total: num(b.total, 'total'), hold: num(b.hold, 'hold'), spotHold: optNum(b.spotHold),
-    supplied: optNum(b.supplied) ?? 0, ltv: optNum(b.ltv) ?? 0, entryNtl: num(b.entryNtl ?? 0, 'entryNtl')
+    supplied: optNum(b.supplied) ?? 0, entryNtl: num(b.entryNtl ?? 0, 'entryNtl')
   }));
   const borrow = Array.isArray(s.tokenToPortfolioBorrowRatio) ? s.tokenToPortfolioBorrowRatio.find((r: any) => r?.[0] === 0)?.[1] : null;
   Object.assign(inventory, { balances, pmRatio: optNum(s.portfolioMarginRatio) ?? 0, borrowRatio: optNum(borrow) ?? 0, spotLoaded: true, spotPushes: inventory.spotPushes + 1 });
@@ -130,14 +130,6 @@ export function spotCoins(): string {
 
 const scaled = (f: (s: DexState) => number) => inventory.dexStates.reduce((t, s) => (f(s) ? t + f(s) * usdPx(collateralOf(s.dex)) : t), 0);
 
-/** HL's leverage base: collateral tokens at their mark, plus under portfolio margin each other supplied token at its LTV. */
-function marginBase(mode: Mode) {
-  if (!inventory.spotLoaded) return NaN;
-  const collaterals = new Set(['USDC', ...[...meta.collateral.values()].map(tokenName)]);
-  const weight = (b: Balance) => (collaterals.has(b.coin) ? 1 : mode === 'portfolioMargin' && b.ltv > 0 && b.supplied > 0 ? b.ltv : 0);
-  return inventory.balances.reduce((t, b) => t + (weight(b) && usdValue(b) * weight(b)), 0);
-}
-
 function unifiedRatio() {
   if (!inventory.spotLoaded) return NaN;
   const by = new Map<string, { mm: number; iso: number }>();
@@ -155,20 +147,22 @@ function unifiedRatio() {
   return Math.min(ratio, 1);
 }
 
-/** The account block's figures as HL computes them. Under portfolio margin and unified accounts the perp equity already sits in the spot USDC balance. */
+/** Under portfolio margin and unified accounts the perp equity already sits in the spot USDC balance. */
 export function summary() {
   const mode = modeOf(inventory.abstraction);
   const spot = inventory.spotLoaded ? inventory.balances.reduce((t, b) => t + usdValue(b), 0) : NaN;
-  const perps = inventory.loaded && !inventory.broken.length ? scaled((s) => s.accountValue) : NaN;
+  const positionsReady = inventory.loaded && !inventory.broken.length;
+  const perps = positionsReady ? scaled((s) => s.accountValue) : NaN;
+  const equity = mode === null ? NaN : mode === 'standard' ? spot + perps : spot;
+  const grossExposure = positionsReady ? inventory.positions.reduce((total, p) => total + (p.szi !== 0 ? Math.abs(p.positionValue) : 0), 0) : NaN;
   const usdc = inventory.balances.find((b) => b.coin === 'USDC');
   const free = !inventory.spotLoaded ? NaN : usdc ? usdc.total - (usdc.spotHold ?? usdc.hold) : 0;
-  const base = { mode, spot, perps, uPnl: inventory.positions.reduce((t, p) => t + p.uPnl, 0), mm: scaled((s) => s.crossMmu) };
+  const base = { mode, spot, perps, equity, grossExposure, leverage: fractionOfEquity(grossExposure, equity), uPnl: inventory.positions.reduce((t, p) => t + p.uPnl, 0), mm: scaled((s) => s.crossMmu) };
   if (mode === null || mode === 'standard') {
     const cross = scaled((s) => s.crossValue) + 1e-8;
     const available = free + scaled((s) => s.withdrawable);
-    return { ...base, equity: mode ? spot + perps : NaN, ratio: base.mm / cross, leverage: scaled((s) => s.crossNtl) / cross, available, borrow: NaN };
+    return { ...base, ratio: base.mm / cross, available, borrow: NaN };
   }
   const ratio = mode === 'unifiedAccount' ? unifiedRatio() : inventory.spotLoaded ? inventory.pmRatio : NaN;
-  const leverage = inventory.dexStates.reduce((t, s) => t + s.crossNtl, 0) / (marginBase(mode) + 1e-8);
-  return { ...base, equity: spot, ratio, leverage, available: free, borrow: inventory.spotLoaded ? inventory.borrowRatio : NaN };
+  return { ...base, ratio, available: free, borrow: inventory.spotLoaded ? inventory.borrowRatio : NaN };
 }

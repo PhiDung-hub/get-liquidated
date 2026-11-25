@@ -29,8 +29,7 @@
   let rows: HTMLDivElement;
   onMount(() => {
     if (!compare && !document.querySelector('[data-testid="chart"].fullscreen')) {
-      const trigger = document.querySelector('[data-testid="market-summary"] [data-testid="market-button"]');
-      const bounds = trigger?.getBoundingClientRect();
+      const bounds = document.querySelector('[data-testid="market-summary"]')?.getBoundingClientRect();
       if (bounds?.height) pickerTop = `${bounds.bottom + 8}px`;
     }
     if (!isTouch()) input.focus();

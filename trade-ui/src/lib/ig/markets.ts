@@ -9,7 +9,10 @@ export interface Account {
 export interface Detail {
   market: Market; currencies: string[]; unit: string; minSize: number | null;
   marketOrders: boolean; stopDistance: number | null; stopUnit: string;
+  contract: number | null; scaling: number; bands: Band[]; trailing: boolean; guaranteed: boolean;
 }
+/** IG's margin tiers: `margin` percent on the contracts from `min` up to `max` (null = no cap), in `currency`. */
+export interface Band { min: number; max: number | null; margin: number; currency: string }
 export interface Session { accountId: string; accounts: Account[]; environment: 'live' }
 export const numeric = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null;
 export const record = (v: unknown): Record<string, any> => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, any> : {};
@@ -30,10 +33,33 @@ export function marketOf(value: unknown, now = Date.now()): Market | null {
   if (!/^[A-Za-z0-9._]{6,30}$/.test(epic) || !name) return null;
   return { epic, name, type: text(i.type || r.instrumentType), expiry: text(i.expiry || r.expiry), bid: numeric(q.bid), offer: numeric(q.offer), status: text(q.marketStatus), delay: numeric(q.delayTime), updated: quoteTime(q.updateTimestampUTC ?? q.updateTimeUTC, now), streaming: (i.streamingPricesAvailable ?? r.streamingPricesAvailable) === true };
 }
+const amount = (v: unknown) => numeric(typeof v === 'string' && v.trim() ? Number(v) : v);
 export function detailOf(value: unknown): Detail {
   const r = record(value), i = record(r.instrument), rules = record(r.dealingRules), market = marketOf(r);
   if (!market) throw new Error('IG returned an invalid market. Refresh before trading.');
-  return { market, currencies: array(i.currencies).map(c => text(record(c).code)).filter(c => /^[A-Z]{3}$/.test(c)), unit: text(i.unit), minSize: record(rules.minDealSize).unit === 'POINTS' ? numeric(record(rules.minDealSize).value) : null, marketOrders: ['AVAILABLE_DEFAULT_ON', 'AVAILABLE_DEFAULT_OFF'].includes(rules.marketOrderPreference), stopDistance: numeric(record(rules.minNormalStopOrLimitDistance).value), stopUnit: text(record(rules.minNormalStopOrLimitDistance).unit) };
+  const bands = array(i.marginDepositBands).map(record).map(b => ({ min: amount(b.min), max: amount(b.max), margin: amount(b.margin), currency: text(b.currency) }));
+  return { market, currencies: array(i.currencies).map(c => text(record(c).code)).filter(c => /^[A-Z]{3}$/.test(c)), unit: text(i.unit), minSize: record(rules.minDealSize).unit === 'POINTS' ? numeric(record(rules.minDealSize).value) : null, marketOrders: ['AVAILABLE_DEFAULT_ON', 'AVAILABLE_DEFAULT_OFF'].includes(rules.marketOrderPreference), stopDistance: numeric(record(rules.minNormalStopOrLimitDistance).value), stopUnit: text(record(rules.minNormalStopOrLimitDistance).unit),
+    contract: amount(i.contractSize), scaling: amount(record(r.snapshot).scalingFactor) || 1, trailing: rules.trailingStopsPreference === 'AVAILABLE', guaranteed: i.controlledRiskAllowed === true,
+    bands: bands.every(b => b.min !== null && b.min >= 0 && b.margin !== null && b.margin > 0 && /^[A-Z]{3}$/.test(b.currency)) ? bands.sort((a, b) => a.min! - b.min!) as Band[] : [] };
+}
+/** Value of one contract at `price` in the margin bands' currency, or null when IG gave no contract size or bands. */
+export const contractValue = (d: Detail, price: number) => d.contract && d.bands.length && price > 0 ? d.contract * price / d.scaling : null;
+/** IG's tiered margin on `size` contracts: each band's percent applies to the contracts inside it. */
+export function marginFor(d: Detail, size: number, price: number) {
+  const value = contractValue(d, price);
+  return value === null ? null : d.bands.reduce((sum, b) => sum + Math.max(0, Math.min(size, b.max ?? Infinity) - b.min) * value * b.margin / 100, 0);
+}
+/** The most contracts `funds` can margin, walking the bands in order. */
+export function maxContracts(d: Detail, funds: number, price: number) {
+  const value = contractValue(d, price);
+  if (value === null || !(funds > 0)) return value === null ? null : 0;
+  let left = funds, size = 0;
+  for (const b of d.bands) {
+    const per = value * b.margin / 100, room = (b.max ?? Infinity) - Math.max(b.min, size);
+    if (left < room * per) return size + left / per;
+    left -= room * per; size = b.max!;
+  }
+  return size;
 }
 export const spread = (m: Market) => m.bid !== null && m.offer !== null && m.offer >= m.bid ? m.offer - m.bid : null;
 export function spreadBps(m: Market) {

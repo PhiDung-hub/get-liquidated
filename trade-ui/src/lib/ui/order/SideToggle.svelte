@@ -18,7 +18,7 @@
 <style>
   .side { position: relative; display: grid; grid-template-columns: 1fr 1fr; height: var(--ctl); margin: 8px 0; padding: 2px; background: var(--surface); border-radius: var(--radius); }
   .pill { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 2px); border-radius: var(--radius); background: var(--buy); transition: transform 0.1s ease-in-out, background-color 0.1s; }
-  .sell .pill { transform: translateX(100%); background: var(--sell); }
+  .sell .pill { transform: translateX(100%); background: var(--sell-action); }
   button { position: relative; padding: 0; background: none; border: 0; border-radius: var(--radius); color: var(--buy-text); font: inherit; cursor: pointer; transition: color 0.1s; }
   button:last-child { color: var(--sell-text); }
   button.on { color: var(--bg); }

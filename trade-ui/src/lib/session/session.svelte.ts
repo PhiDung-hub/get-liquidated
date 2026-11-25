@@ -60,6 +60,7 @@ const listed = (address: string) => accounts.list.some((a) => a.address === addr
 function addAccount(address: string) {
   const a = address.toLowerCase();
   if (!listed(a)) accounts.list = [...accounts.list, { address: a, label: '' }];
+  if (offer?.address === a) dropOffer();
   return a;
 }
 export function renameAccount(address: string, label: string) {
@@ -155,24 +156,45 @@ export async function initSession() {
   const active = typeof savedAccounts.active === 'string' && listed(savedAccounts.active) ? savedAccounts.active : null;
   if (active) return useMaster(active);
   const [account] = await walletAccounts().catch(() => []);
-  if (account) return useMaster(addAccount(account));
+  if (account && (!accounts.list.length || listed(account))) return useMaster(addAccount(account));
 }
 
 let deferred: { accounts: string[]; drop: () => void } | null = null;
+let offer: { address: string; drop: () => void } | null = null;
+function dropOffer() {
+  offer?.drop();
+  offer = null;
+}
+
+/** Lists the account the wallet switched to and trades on it, only once Connect is clicked; while busy it is listed and followed once idle. */
+async function connectOffered(account: string) {
+  if (!walletBlocked() || !session.master) return useMaster(addAccount(account));
+  addAccount(account);
+  saveAccounts();
+  deferred?.drop();
+  deferred = { accounts: [account], drop: toast.sticky(`Added ${fmtAddr(account)} — finish or stop your chases on ${fmtAddr(session.master)} to follow it`) };
+}
 
 /**
  * While chases or orders are in flight the agent keeps signing for the current account, so the switch waits for them.
- * A locked wallet reports no account; the agent needs no wallet, so the session stays.
+ * A locked wallet reports no account; the agent needs no wallet, so the session stays. An account not in the list
+ * joins it only from Connect.
  */
 function followWallet(value: unknown) {
   let accounts: string[];
   try { accounts = parseAccounts(value); } catch (e) { toast.error((e as Error).message); return; }
   deferred?.drop();
   deferred = null;
+  dropOffer();
   const account = accounts?.[0]?.toLowerCase();
   if (!account || !session.master || session.linked || account === session.master) return;
   if (walletBlocked()) {
-    deferred = { accounts, drop: toast.sticky(`Wallet switched to ${fmtAddr(account)} — finish or stop your chases on ${fmtAddr(session.master)} to follow it`) };
+    deferred = { accounts, drop: toast.sticky(`Wallet switched to ${fmtAddr(account)} — finish or stop your chases on ${fmtAddr(session.master)} to ${listed(account) ? 'follow' : 'connect'} it`) };
+    return;
+  }
+  if (!listed(account)) {
+    const run = () => void connectOffered(account).catch((e) => toast.error(e.message));
+    offer = { address: account, drop: toast.sticky(`Wallet switched to ${fmtAddr(account)}, not in your accounts — orders still go to ${fmtAddr(session.master)}`, { label: 'Connect', run }) };
     return;
   }
   // The wallet, not this page, moved the account: the next order goes to it, so say so.
@@ -224,6 +246,7 @@ export async function addWalletAccount(refusal: () => string) {
 
 export async function useMaster(address: string) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error('Invalid account address');
+  dropOffer();
   const g = ++gen;
   agentKey = null;
   session.agent = null;
@@ -414,6 +437,7 @@ export async function adoptLinked(p: LinkPayload): Promise<void> {
 export async function disconnect() {
   const master = session.master;
   const rest = session.linked ? accounts.list.filter((a) => a.address !== master) : [];
+  dropOffer();
   gen++;
   if (master) save(storeKey(master), null);
   agentKey = null;

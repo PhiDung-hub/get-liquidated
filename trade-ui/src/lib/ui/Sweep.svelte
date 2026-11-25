@@ -90,7 +90,7 @@
   .dim { color: var(--dim); }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .actions button { height: var(--ctl); padding: 0 16px; border-radius: var(--radius); background: var(--surface); color: var(--bright); }
-  .actions .go { background: var(--sell); color: var(--bg); }
+  .actions .go { background: var(--sell-action); color: var(--bg); }
   @media (pointer: coarse) { .hint, p.dim:not(:has(.stopped)) { display: none; } }
   @media (max-width: 900px) {
     td { padding: 10px 6px; white-space: normal; }

@@ -211,7 +211,7 @@
   .coach-link button, .card .dim button, .more { color: var(--accent); }
   .card .dim { position: relative; }
   .card .dim button { padding: 0; background: none; }
-  .more { cursor: help; }
+  .more { cursor: pointer; }
   .pop { display: none; position: absolute; z-index: 5; left: 0; right: 0; bottom: 100%; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--dim); cursor: auto; }
   .more:hover .pop, .more:focus-within .pop, .more.shown .pop { display: grid; }
   .setup { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -226,7 +226,7 @@
   .pair label { flex-direction: column; align-items: stretch; gap: 4px; }
   .head { display: flex; align-items: center; gap: 8px; color: var(--bright); }
   .head > span:first-child { flex: 1; min-width: 0; }
-  .note { color: var(--warn); font-weight: 700; padding: 0 6px; cursor: help; }
+  .note { color: var(--warn); font-weight: 700; padding: 0 6px; cursor: pointer; }
   .tip { display: none; position: absolute; z-index: 6; left: 10px; right: 10px; top: 30px; padding-top: 8px; font-weight: 400; cursor: auto; }
   .tipbox { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
   .head .tip button { padding: 2px 8px; color: var(--accent); font-size: inherit; line-height: inherit; }

@@ -18,7 +18,7 @@
   const usdOf = (n: number) => (loaded ? fmtUsd(n) : '—');
   type Row = { id: string; label: string; value: string; title?: string; pnl?: boolean };
   const upnl = $derived<Row>({ id: 'inv-upnl', label: 'Unrealized PnL', value: usdOf(s.uPnl), title: 'excl. funding & fees', pnl: true });
-  // HL's account panel rows and labels: one set for portfolio-margin and unified accounts, Spot, Perps and Perps Overview for the rest.
+  const leverage = $derived<Row>({ id: 'inv-leverage', label: 'Account Leverage', value: lev(s.leverage), title: 'Total open perp exposure divided by current portfolio value.' });
   const rows = $derived.by((): Row[] => {
     if (s.mode === 'portfolioMargin' || s.mode === 'unifiedAccount') {
       const pm = s.mode === 'portfolioMargin';
@@ -28,7 +28,7 @@
         { id: 'inv-ratio', label: pm ? 'Portfolio Margin Ratio' : 'Unified Account Ratio', value: pct(s.ratio) },
         ...(pm ? [{ id: 'inv-borrow', label: 'Borrow Cap Used', value: pct(s.borrow) }] : []),
         { id: 'inv-mm', label: 'Perps Maintenance Margin', value: usdOf(s.mm) },
-        { id: 'inv-leverage', label: pm ? 'Portfolio Account Leverage' : 'Unified Account Leverage', value: lev(s.leverage) },
+        leverage,
         { id: 'inv-available', label: 'Available', value: usdOf(s.available), title: 'free USDC: total − spot hold' }
       ];
     }
@@ -39,7 +39,7 @@
       upnl,
       { id: 'inv-ratio', label: 'Cross Margin Ratio', value: pct(s.ratio) },
       { id: 'inv-mm', label: 'Maintenance Margin', value: usdOf(s.mm) },
-      { id: 'inv-leverage', label: 'Cross Account Leverage', value: lev(s.leverage) },
+      leverage,
       { id: 'inv-available', label: 'Available', value: usdOf(s.available), title: 'free USDC plus perp withdrawable' }
     ];
   });
@@ -61,7 +61,7 @@
     return Number.isFinite(ratio) ? ratio >= 1 ? 'sell' : ratio >= 0.8 ? 'warn' : ratio > 0 ? 'accent' : '' : '';
   }
   const agentDays = $derived(session.agent?.validUntil ? (session.agent.validUntil - Date.now()) / DAY : null);
-  const balances = $derived(inventory.balances.filter((b) => b.total !== 0));
+  const balances = $derived(inventory.balances.filter((b) => Math.abs(usdValue(b)) >= 0.1));
 
   const opening = (o: OpenOrder) => !o.reduceOnly && !o.isTrigger;
   const notional = (list: OpenOrder[]) => list.reduce((s, o) => s + o.limitPx * o.sz, 0);
@@ -109,8 +109,6 @@
       </section>
     </div>
 
-    <IdleYield />
-
     {#snippet fold(title: string, n: number, body: Snippet)}
       {#if phone.current}
         <details data-testid="fold-{title.toLowerCase()}"><summary>{title} ({n})</summary>{@render body()}</details>
@@ -135,22 +133,25 @@
     {/snippet}
     {#snippet balanceTable()}
       <table class="balances">
-        <thead><tr><th>Coin</th><th>Total</th><th>Hold</th><th>Free</th><th>USD Value</th></tr></thead>
+        <thead><tr><th>Coin</th><th>Total</th><th><abbr title="Amount Hyperliquid reports as held, such as funds reserved for orders or margin.">Reserved</abbr></th><th><abbr title="Total balance minus the reserved amount.">Available</abbr></th><th>USD Value</th></tr></thead>
         <tbody>
           {#each balances as b (b.coin)}
             <tr data-testid="balance-row">
               <td title={b.coin}>{b.coin}</td>
               <td data-help title={`Total: ${fmtNum(b.total, 8)} ${b.coin}`}>{amt(b.total)}</td>
-              <td data-help title={`Hold: ${fmtNum(b.spotHold ?? b.hold, 8)} ${b.coin}`}>{amt(b.spotHold ?? b.hold)}</td>
-              <td data-help title={`Free: ${fmtNum(b.total - (b.spotHold ?? b.hold), 8)} ${b.coin}`}>{amt(b.total - (b.spotHold ?? b.hold))}</td>
+              <td data-help title={`Reserved: ${fmtNum(b.spotHold ?? b.hold, 8)} ${b.coin}`}>{amt(b.spotHold ?? b.hold)}</td>
+              <td data-help title={`Available: ${fmtNum(b.total - (b.spotHold ?? b.hold), 8)} ${b.coin}`}>{amt(b.total - (b.spotHold ?? b.hold))}</td>
               <td data-help title={`USD value: ${Number.isFinite(usdValue(b)) ? `${usdValue(b) < 0 ? '-' : ''}$${fmtNum(Math.abs(usdValue(b)), 8)}` : '—'}`}>{usd(usdValue(b))}</td>
             </tr>
           {/each}
         </tbody>
       </table>
     {/snippet}
-    {#if exposure.length}{@render fold('Exposure', exposure.length, exposureTable)}{/if}
-    {#if balances.length}{@render fold('Balances', balances.length, balanceTable)}{/if}
+    <div class="detail-groups">
+      {#if balances.length}{@render fold('Balances', balances.length, balanceTable)}{/if}
+      {#if exposure.length}{@render fold('Exposure', exposure.length, exposureTable)}{/if}
+      <IdleYield />
+    </div>
   {/if}
 </div>
 
@@ -163,7 +164,11 @@
   .account-block > h4:first-child { margin-top: 0; }
   summary { margin: 8px 0 4px; color: var(--bright); cursor: pointer; }
   p { margin: 0; }
-  .rows { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 8px 12px; line-height: calc(var(--fs) * 1.25); }
+  .rows, .detail-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); align-items: start; gap: 12px 16px; }
+  .rows { line-height: calc(var(--fs) * 1.25); }
+  .detail-groups { margin-top: 16px; }
+  .detail-groups > * { min-width: 0; }
+  .detail-groups h4 { margin-top: 0; }
   .group { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-content: start; gap: 3px 8px; }
   .group::before { content: attr(aria-label); grid-column: 1 / -1; padding-bottom: 3px; margin-bottom: 2px; border-bottom: 1px solid var(--line); color: var(--bright); font-weight: 500; }
   .v { text-align: right; white-space: nowrap; }
@@ -172,12 +177,12 @@
   .key.sell { color: var(--sell-text); }
   .key.accent { color: var(--accent); }
   .key.warn { color: var(--warn); }
-  abbr { cursor: default; text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
+  abbr { text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
   .warn { color: var(--warn); }
   table { width: 100%; font-size: max(8px, calc(var(--fs) * 0.917)); }
   th, td { padding: 3px 2px; white-space: nowrap; }
   th:first-child, td:first-child { width: 100%; min-width: 5ch; max-width: 0; padding-left: 0; overflow: hidden; text-overflow: ellipsis; }
   th:not(:first-child), td:not(:first-child) { text-align: right; }
-  .balances th:not(:first-child), .balances td:not(:first-child) { padding-left: 12px; }
+  .balances th:not(:first-child), .balances td:not(:first-child) { padding-left: 5px; }
   @media (max-width: 900px) { summary { margin: 6px 0 0; padding: 8px 0; } }
 </style>

@@ -124,6 +124,6 @@
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .actions button { height: var(--ctl); padding: 0 16px; border-radius: var(--radius); background: var(--surface); color: var(--bright); }
   .actions .go { background: var(--buy); color: var(--bg); }
-  .actions .go.sell { background: var(--sell); }
+  .actions .go.sell { background: var(--sell-action); }
   .actions .go:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>

@@ -1,6 +1,6 @@
 
 export type Modal = { kind: 'close'; coin: string; limit: boolean } | { kind: 'reverse'; coin: string } | { kind: 'trailing'; coin: string } | { kind: 'positionTpsl'; coin: string; focus: 'TP' | 'SL' } | { kind: 'isoMargin'; coin: string } | { kind: 'editOrder'; oid: number } | { kind: 'study'; id: string };
-export type Overlay = null | 'interval' | 'goto' | 'picker' | 'quick' | 'compare' | 'help' | 'settings' | 'migration' | 'leverage' | 'margin' | 'link' | 'linkImport' | 'linkScan' | 'sweep' | 'aiConnect' | 'indicators' | Modal;
+export type Overlay = null | 'interval' | 'goto' | 'picker' | 'quick' | 'compare' | 'help' | 'settings' | 'migration' | 'leverage' | 'margin' | 'link' | 'linkImport' | 'linkScan' | 'sweep' | 'aiConnect' | 'indicators' | 'marketFunding' | Modal;
 export type BottomTab = 'positions' | 'balances' | 'orders' | 'fills' | 'funding';
 export type SettingsTab = 'execution' | 'hotkeys' | 'display' | 'data';
 export const ui = $state({

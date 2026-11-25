@@ -131,7 +131,7 @@
           <dl class="fill-details" data-testid="fill-details">
             <div><dt>Time (UTC)</dt><dd class="num">{fmtTime(f.time)}</dd></div>
             <div><dt>Entry</dt><dd class="num" data-testid="fill-entry">{@render entry(f)}</dd></div>
-            <div><dt>Trade value</dt><dd class="num">{@render value(f)}</dd></div>
+            <div><dt>Trade value</dt><dd class="num quote">{@render value(f)}</dd></div>
             <div><dt>Fee</dt><dd class="num">{@render fee(f)}</dd></div>
             <div><dt>Role</dt><dd>{f.crossed ? 'taker' : 'maker'}</dd></div>
             {#if progress?.partial}<div><dt>{progress.working ? 'Remaining' : 'Unfilled'}</dt><dd class="num" data-testid="fill-remaining">{fmtSz(progress.remaining, dec(f.coin))}</dd></div>{/if}
@@ -142,21 +142,34 @@
     {#if rows.length > cardsShown}<button class="more" data-testid="fills-more" onclick={() => (cardsShown += CARD_STEP)}>Show more</button>{/if}
   </div>
 {:else}
-  <table>
+  <table class="fills-table">
+    <colgroup>
+      <col style:width="11%" />
+      <col style:width="8%" />
+      <col style:width="20%" />
+      <col style:width="8%" />
+      <col style:width="8%" />
+      <col style:width="9%" />
+      <col style:width="8%" />
+      <col style:width="9%" />
+      <col style:width="10%" />
+      <col style:width="5%" />
+      <col style:width="4%" />
+    </colgroup>
     <thead><tr><SortHead {sorter} /><th>Type</th><th>Role</th></tr></thead>
     <tbody>
       {#each rows as f (`${f.coin}:${f.tid}:${f.oid}`)}
         <tr data-testid="fill-row" onpointerenter={(e) => f.liquidation && e.pointerType !== 'touch' && showLiq(f, e.currentTarget)} onpointerleave={(e) => e.pointerType !== 'touch' && liq?.f.tid === f.tid && (liq = null)} onpointerup={(e) => tapLiq(e, f)}>
           <td class="num dim">{fmtTime(f.time)}</td>
-          <td><Coin coin={f.coin} /></td>
-          <td class:buy={f.side === 'B'} class:sell={f.side === 'A'}>{@render dir(f, entrySizeOf(f) > 0 && !!fillProgress(f)?.partial)}</td>
+          <td class="fill-coin"><Coin coin={f.coin} /></td>
+          <td class="direction" class:buy={f.side === 'B'} class:sell={f.side === 'A'}>{@render dir(f, entrySizeOf(f) > 0 && !!fillProgress(f)?.partial)}</td>
           <td class="num" data-testid="fill-price">{@render price(f)}</td>
           <td class="num dim" data-testid="fill-entry">{@render entry(f)}</td>
           <td class="num">{fmtSz(f.sz, dec(f.coin))}</td>
-          <td class="num">{@render value(f)}</td>
-          <td class="num dim">{@render fee(f)}</td>
+          <td class="num quote">{@render value(f)}</td>
+          <td class="num dim quote">{@render fee(f)}</td>
           <td class="num" class:buy={netPnl(f) >= 0} class:sell={netPnl(f) < 0}>{fmtUsd(netPnl(f))}</td>
-          <td class="dim">{entryOf(f.cloid ?? '')?.kind ?? '—'}</td>
+          <td class="dim fill-type">{entryOf(f.cloid ?? '')?.kind ?? '—'}</td>
           <td class="dim">{f.crossed ? 'taker' : 'maker'}</td>
         </tr>
       {/each}
@@ -173,6 +186,9 @@
 {/if}
 
 <style>
+  .fills-table { table-layout: fixed; min-width: 100em; }
+  .fill-coin, .direction, .fill-type, .quote { white-space: normal; }
+  .fill-coin, .direction, .fill-type { overflow-wrap: anywhere; }
   .bar { display: flex; gap: 14px; align-items: center; padding: 6px 8px; font-size: max(8px, calc(var(--fs) * 0.917)); flex-wrap: wrap; }
   p { padding: 12px; }
   .bar:has(abbr) { justify-content: space-between; }
@@ -191,7 +207,7 @@
   .fill-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .fill .chevron { min-width: 0; min-height: 0; padding: 0; background: none; color: var(--dim); }
   .liq { color: var(--sell-text); font-weight: 600; }
-  .liq.hover { cursor: help; text-decoration: underline dashed; text-underline-offset: 3px; }
+  .liq.hover { cursor: pointer; text-decoration: underline dashed; text-underline-offset: 3px; }
   .liq-card {
     position: fixed; z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 10px; max-width: calc(100vw - 16px);
     background: var(--panel); color: var(--text); border: 1px solid color-mix(in srgb, var(--sell) 55%, var(--line)); border-radius: var(--radius); box-shadow: 0 6px 20px color-mix(in srgb, #000 40%, transparent);

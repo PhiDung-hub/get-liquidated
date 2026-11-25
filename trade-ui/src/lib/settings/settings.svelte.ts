@@ -11,7 +11,7 @@ export interface Sizing { value: number; unit: SizeUnit; basis: 'balance' | 'pos
 export type HotkeyType = 'market' | 'alo' | 'chase' | 'scale';
 export const HOTKEY_TYPES: HotkeyType[] = ['market', 'alo', 'chase', 'scale'];
 export interface Binding { code: string; shift: boolean; alt?: boolean }
-/** Sizes in px; phone is the mobile chart height. Zero keeps automatic heights; the tall* sizes are a tall portrait screen's own. */
+/** Sizes in px; zero uses the automatic size. The tall* sizes apply to tall portrait screens. */
 export interface Layout { book: number; panel: number; bottom: number; sidebarTrade: number; phone: number; tallBook: number; tallPanel: number; tallMid: number; tallBottom: number }
 export type PhoneTab = 'market' | 'trade' | 'account';
 export const TICKET_KINDS = ['market', 'limit', 'scale', 'chase', 'stopLimit', 'stopMarket', 'takeLimit', 'takeMarket'] as const;
@@ -35,7 +35,7 @@ export interface Settings {
   /** HIP-3 dexes whose "deployed independently" banner was dismissed. */
   dismissedDexes: string[];
   /** indicators: the display layers; studies: the chart's indicators in legend and pane order; favStudies: the Indicators dialog's starred types. */
-  chart: { interval: Interval; pinnedIntervals: Interval[]; desktopPinnedIntervals: Interval[]; volume: boolean; timezone: string; indicators: { positions: { on: boolean }; fills: { on: boolean }; drawings: { on: boolean }; ai: { on: boolean } }; studies: Study[]; favStudies: string[]; compare: Record<string, string[]>; panes: { coin: string; interval: Interval }[] };
+  chart: { interval: Interval; pinnedIntervals: Interval[]; desktopPinnedIntervals: Interval[]; volume: boolean; timezone: string; indicators: { positions: { on: boolean }; fills: { on: boolean }; drawings: { on: boolean }; ai: { on: boolean } }; studies: Study[]; favStudies: string[]; compare: Record<string, string[]> };
   panel: { kind: TicketKind; sizeUnit: 'coin' | 'usd' };
   display: { minimized: { trade: boolean; account: boolean; book: boolean; positions: boolean }; theme: ThemeId; fs: number; phoneTab: PhoneTab; zen: boolean; zenOpen: ZenOpen; superstar: boolean; lol: boolean; layout: Layout };
 }
@@ -59,9 +59,9 @@ export const DEFAULTS: Settings = {
   superstars: ['BTC', 'ETH', 'SOL', 'HYPE', 'DOGE'],
   barSplit: true,
   dismissedDexes: [],
-  chart: { interval: '15m', pinnedIntervals: [], desktopPinnedIntervals: [...INTERVALS], volume: true, timezone: 'UTC', indicators: { positions: { on: true }, fills: { on: true }, drawings: { on: true }, ai: { on: true } }, studies: DEFAULT_STUDIES, favStudies: [], compare: {}, panes: [] },
+  chart: { interval: '15m', pinnedIntervals: [], desktopPinnedIntervals: [...INTERVALS], volume: true, timezone: 'UTC', indicators: { positions: { on: true }, fills: { on: true }, drawings: { on: true }, ai: { on: true } }, studies: DEFAULT_STUDIES, favStudies: [], compare: {} },
   panel: { kind: 'market', sizeUnit: 'coin' },
-  display: { minimized: { trade: false, account: false, book: false, positions: false }, theme: THEMES[0].id, fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 240, panel: PANEL_MIN, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
+  display: { minimized: { trade: false, account: false, book: false, positions: false }, theme: THEMES[0].id, fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 0, panel: 0, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
 };
 
 const KEY = SETTINGS_KEY;
@@ -82,6 +82,7 @@ export const RANGES: Record<string, [number, number]> = {
 };
 const INTEGERS = ['scale.count', 'display.fs', 'display.layout.book', 'display.layout.panel', 'display.layout.bottom', 'display.layout.sidebarTrade', 'display.layout.phone', 'display.layout.tallBook', 'display.layout.tallPanel', 'display.layout.tallMid', 'display.layout.tallBottom'];
 export const validNum = (path: string, v: unknown) => {
+  if (v === 0 && (path === 'display.layout.book' || path === 'display.layout.panel')) return true;
   const [min, max] = RANGES[path] ?? [-Infinity, Infinity];
   return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max && (!INTEGERS.includes(path) || Number.isInteger(v));
 };
@@ -114,7 +115,6 @@ function merge(def: any, raw: any, path: string, warn: string[]): any {
     return valid;
   }
   if (path === 'chart.favStudies') return Array.isArray(raw) ? [...new Set(raw.filter((t) => typeof t === 'string' && DEFS[t]))] : (warn.push(`${path}: expected a list, kept current`), clone(def));
-  if (path === 'chart.panes') return Array.isArray(raw) ? raw.filter((p) => isCoin(p?.coin) && ALL_INTERVALS.includes(p?.interval)).slice(0, MAX_PANES).map((p) => ({ coin: p.coin, interval: p.interval })) : (warn.push(`${path}: expected a list, kept current`), clone(def));
   if (Array.isArray(def)) {
     if (Array.isArray(raw) && raw.every((x) => typeof x === typeof (def[0] ?? ''))) return raw.map((x: any) => (typeof x === 'object' && def[0] ? merge(def[0], x, path, warn) : x));
     warn.push(`${path}: expected a list, kept current`);
@@ -200,8 +200,6 @@ function splitBar(raw: any) {
 const upgrade = (raw: any) => splitBar(fromIndicatorKeys(fromPresets(raw)));
 
 export const MAX_COMPARE = 5;
-/** Extra charts beside the main one. */
-export const MAX_PANES = 3;
 const isCoin = (c: unknown): c is string => typeof c === 'string' && /^[\w:.@/-]{1,40}$/.test(c);
 
 /** Main coin → compared coins: distinct coin names other than the main one, at most MAX_COMPARE. */
@@ -219,8 +217,8 @@ const stored = load<any>(KEY, undefined);
 const initial = merge(DEFAULTS, upgrade(stored), '', []) as Settings;
 // An unknown stored order type opens on Limit, not the Market default, so one click can't send a market order.
 if (stored?.panel?.kind !== undefined && initial.panel.kind !== stored.panel.kind) initial.panel.kind = 'limit';
-// The former defaults (320/340) were never a choice, so they open at the new minimum widths.
-if (initial.display.layout.book === 320 && initial.display.layout.panel === 340) Object.assign(initial.display.layout, { book: DEFAULTS.display.layout.book, panel: PANEL_MIN });
+// The former defaults (320/340) use automatic widths.
+if (initial.display.layout.book === 320 && initial.display.layout.panel === 340) Object.assign(initial.display.layout, { book: 0, panel: 0 });
 // The phone tabs replaced the collapsible phone chart; a chart left open becomes the Market tab.
 if (stored?.display?.phoneTab === undefined && stored?.display?.mobileChart === true) initial.display.phoneTab = 'market';
 export const settings = $state<Settings>(initial);

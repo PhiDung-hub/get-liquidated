@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte';
+  import { tick, untrack, type Snippet } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { market, selectCoin } from '$lib/market/market.svelte';
-  import { isSpot, meta, parseCtx, parseSpotCtx, quoteOf, type Ctx } from '$lib/market/meta.svelte';
+  import { isSpot, meta, parseCtx, parseSpotCtx, quoteOf, symOf, type Ctx } from '$lib/market/meta.svelte';
   import { safe } from '$lib/market/watch.svelte';
   import { removeQuick, topChips } from '$lib/market/views.svelte';
   import { socket } from '$lib/transport/ws.svelte';
   import { settings, persist, DEFAULTS } from '$lib/settings/settings.svelte';
   import ThemePicker from './ThemePicker.svelte';
   import { resumeWallet, session, walletReady } from '$lib/session/session.svelte';
-  import { fmtIn, fmtUsd, fmtNum, fmtPct, fmtPx, pxDecimals } from '$lib/util/format';
+  import { fmtIn, fmtUsd, fmtNum, fmtPct, fmtPx, fmtSz, pxDecimals } from '$lib/util/format';
   import { openSettings, ui } from './state.svelte';
   import { load, save } from '$lib/util/storage';
   import Coin from './Coin.svelte';
@@ -18,6 +18,8 @@
   import ZenToggle from './ZenToggle.svelte';
   import FundingRate from './FundingRate.svelte';
   import { inZen } from './zen';
+
+  let { portrait, children }: { portrait: boolean; children: Snippet<[Snippet, Snippet, Snippet]> } = $props();
 
   let suggestMigration = $state(false);
   let migrationChecked = false;
@@ -33,13 +35,25 @@
   }
 
   const ctx = $derived(market.ctx ?? meta.ctxs.get(market.coin) ?? null);
-  const szDec = $derived(meta.byName.get(market.coin)?.szDecimals ?? 0);
+  const instrument = $derived(meta.byName.get(market.coin));
+  const szDec = $derived(instrument?.szDecimals ?? 0);
   // Spot has no oracle, open interest, funding or leverage; its volume is in the quote token.
   const spot = $derived(isSpot(market.coin));
   const quote = $derived(quoteOf(market.coin));
   const change = $derived(ctx ? (ctx.markPx - ctx.prevDayPx) / ctx.prevDayPx : NaN);
   const phone = new MediaQuery('max-width: 900px');
   const diff = $derived(ctx ? ctx.markPx - ctx.prevDayPx : NaN);
+  const dayMove = $derived.by(() => {
+    if (!ctx || !Number.isFinite(diff)) return '—';
+    const abs = fmtNum(Math.abs(diff), Math.max(2, pxDecimals(ctx.markPx, szDec, spot)));
+    return `${diff >= 0 ? '+' : '-'}${quote === 'USDC' ? `$${abs}` : `${abs} ${quote}`}`;
+  });
+  const oiHelp = 'Two-sided open interest is the total size of open long and short positions in this contract.';
+  const fundingHelp = 'Positive hourly funding is paid by longs to shorts. When the rate is negative, shorts pay longs. Funding is a peer-to-peer transfer with no fees that keeps the perpetual price closer to spot. The countdown shows time until the next settlement.';
+  const oracleHelp = $derived(instrument?.dex
+    ? 'The reference price for funding payments. See the HIP-3 deployer’s documentation for details.'
+    : 'The median of external prices reported by validators. Hyperliquid uses it to calculate funding rates.');
+  const markHelp = 'Used for margin, unrealized PnL, liquidations, and triggering take-profit and stop-loss orders.';
   let statsOpen = $state(false);
   function toAccountTab() {
     settings.display.phoneTab = 'account';
@@ -125,18 +139,57 @@
 {#snippet quickOpen()}
 <button class="quick" data-testid="quick-open" aria-label="Edit quick-switch markets" title="Quick-switch markets: add, remove, reorder" onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'quick'))}>★★</button>
 {/snippet}
+{#snippet desktopControls()}
+  <div class="right">
+    <Connection />
+    <ThemePicker value={settings.display.theme} onchange={id => { settings.display.theme = id; persist(); }} />
+    <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
+  </div>
+{/snippet}
 {#snippet more()}
-<div class="stat"><span class="dim">24h Vol</span><span class="num" data-testid="day-volume">{ctx ? fmtIn(ctx.dayNtlVlm, quote) : '—'}</span></div>
+<div class="stat"><span class="dim">24h Volume</span><span class="num" data-testid="day-volume">{ctx ? fmtIn(ctx.dayNtlVlm, quote) : '—'}</span></div>
 {#if !spot}
-<div class="stat"><span class="dim">OI</span><span class="num" data-testid="open-interest">{ctx?.openInterest != null ? fmtUsd(ctx.openInterest * ctx.markPx) : '—'}</span></div>
+<div class="stat">
+  <abbr class="dim help-label" title={oiHelp}>Open Interest</abbr>
+  <span class="num" data-testid="open-interest" data-help-detail={ctx?.openInterest != null ? `${fmtSz(ctx.openInterest, szDec)} ${symOf(market.coin)}` : undefined}>{ctx?.openInterest != null ? fmtUsd(ctx.openInterest * ctx.markPx) : '—'}</span>
+</div>
 {/if}
 {/snippet}
 {#snippet fundingStat()}
 {#if !spot}
-<div class="stat"><span class="dim">Funding</span><FundingRate rate={ctx?.funding ?? null} running={!inZen()} /></div>
+  {#if phone.current}
+    <div class="stat"><abbr class="dim help-label" title={fundingHelp}>Funding</abbr><FundingRate rate={ctx?.funding ?? null} running={!inZen()} /></div>
+  {:else}
+    <button class="stat funding-history" data-testid="market-funding-open" aria-haspopup="dialog" aria-label="Market funding history" data-help-detail={fundingHelp} onclick={() => (ui.overlay = 'marketFunding')}>
+      <span class="dim help-label">Funding / Countdown</span><FundingRate rate={ctx?.funding ?? null} running={!inZen()} separate />
+    </button>
+  {/if}
 {/if}
 {/snippet}
 
+{#snippet marketSummary()}
+<div class="market-summary" class:portrait-summary={portrait} data-testid="market-summary">
+  <div class="selection">
+    <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
+      <Coin coin={market.coin} quote={quote} /> ▾
+    </button>
+    {#if !spot && instrument?.maxLeverage}
+      <span class="max-leverage" data-testid="market-max-leverage" title="Maximum leverage for this market">{instrument.maxLeverage}x</span>
+    {/if}
+  </div>
+  <div class="stat"><abbr class="dim help-label" title={markHelp}>Mark</abbr><span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></div>
+  {#if !spot}<div class="stat"><abbr class="dim help-label" title={oracleHelp}>Oracle</abbr><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div>{/if}
+  <div class="stat"><span class="dim">24h Change</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{ctx ? `${dayMove} (${fmtPct(change)})` : '—'}</span></div>
+  {@render more()}
+  {@render fundingStat()}
+  {#if !inZen() && !ui.chartFull}<ZenToggle />{/if}
+</div>
+{/snippet}
+{#snippet pinnedMarkets()}
+  <div class="desk-nav portrait-pins">{@render chipStrip()}</div>
+{/snippet}
+
+{#snippet header()}
 {#if phone.current}
   <header class="bar">
     <img class="logo" src="/icon-192.png" alt="" width="24" height="24" />
@@ -149,11 +202,11 @@
   <section class="ticker" data-testid="ticker">
     <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
       <span class="name"><Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾</span>
-      {#if meta.byName.get(market.coin) && !spot}<span class="lev">{meta.byName.get(market.coin)?.maxLeverage}x</span>{/if}
+      {#if !spot && instrument?.maxLeverage}<span class="lev">{instrument.maxLeverage}x</span>{/if}
     </button>
     <div class="price">
       <span class="num big" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>
-      <span class="num day" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{#if ctx}<span class="abs">{diff >= 0 ? '+' : '-'}{fmtNum(Math.abs(diff), pxDecimals(ctx.markPx, szDec, spot))} / </span>{fmtPct(change)}{:else}—{/if}</span>
+      <span class="num day" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{ctx ? `${dayMove} / ${fmtPct(change)}` : '—'}</span>
     </div>
     {@render quickOpen()}
     <button class="more" data-testid="ticker-more" aria-expanded={statsOpen} aria-label={statsOpen ? 'Hide market stats' : 'Show market stats'} onclick={(e) => (e.currentTarget.blur(), (statsOpen = !statsOpen))}>{statsOpen ? '▴' : '▾'}</button>
@@ -166,26 +219,12 @@
     {/if}
   </section>
 {:else}
-  <header class="desk">
+  <header class="desk" class:portrait>
     <div class="desk-nav">
-      {@render chipStrip()}
-      <div class="right">
-        <Connection />
-        <ThemePicker value={settings.display.theme} onchange={id => { settings.display.theme = id; persist(); }} />
-        <button data-testid="settings-button" aria-label="settings" title="Settings (hotkeys, sizes)" onclick={(e) => (e.currentTarget.blur(), openSettings('execution'))}>⚙</button>
-      </div>
+      {#if !portrait}{@render chipStrip()}{/if}
+      {@render desktopControls()}
     </div>
-    <div class="market-summary" data-testid="market-summary">
-      <button class="coin" data-testid="market-button" onclick={(e) => ((ui.overlay = 'picker'), e.currentTarget.blur())}>
-        <Coin coin={market.coin} quote={quoteOf(market.coin)} /> ▾
-      </button>
-      <div class="stat"><span class="dim">Mark</span><span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></div>
-      {#if !spot}<div class="fold oracle"><div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div></div>{/if}
-      <div class="stat"><span class="dim">24h</span><span class="num" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{fmtPct(change)}</span></div>
-      {@render fundingStat()}
-      <div class="fold strip">{@render more()}</div>
-      {#if !inZen() && !ui.chartFull}<ZenToggle />{/if}
-    </div>
+    {#if !portrait}{@render marketSummary()}{/if}
   </header>
 {/if}
 {#if suggestMigration}
@@ -195,6 +234,9 @@
     <button aria-label="Dismiss migration suggestion" onclick={dismissMigration}>×</button>
   </aside>
 {/if}
+{/snippet}
+
+{@render children(header, pinnedMarkets, marketSummary)}
 
 <style>
   .migration-suggestion { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -203,16 +245,17 @@
   header { border-bottom: 1px solid var(--line); overflow: clip; white-space: nowrap; }
   .desk-nav, .market-summary, .bar { display: flex; align-items: center; }
   .desk-nav { padding: calc(4px + env(safe-area-inset-top)) 12px 4px; border-bottom: 1px solid var(--line); }
-  .market-summary { padding: 4px 12px; background: var(--panel); }
-  .market-summary > .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .market-summary > .stat, .fold .stat { margin-left: 20px; }
+  .portrait .desk-nav { border-bottom: 0; }
+  .portrait-pins { padding-block: 2px 3px; }
+  .market-summary { flex-wrap: wrap; gap: 5px clamp(12px, 2.1vw, 32px); padding: 8px 12px; background: var(--panel); }
+  .selection { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .selection .coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .max-leverage { padding: 1px 5px; border-radius: var(--radius); background: var(--surface); color: var(--accent); }
+  .help-label { text-decoration: underline dashed var(--faint); text-underline-offset: 3px; }
+  .funding-history { background: none; padding: 0; align-items: start; text-align: left; }
+  .funding-history:hover > .dim { color: var(--bright); }
   .market-summary > :global(.zen-toggle) { margin-inline-start: auto; }
-  .market-summary > .strip { margin-inline-end: 12px; }
-  .fold { flex: 1 1 0; min-width: 0; max-width: max-content; flex-wrap: wrap; row-gap: 50vh; overflow: clip; }
-  .fold::before { content: ''; }
-  .fold { display: flex; font-size: max(8px, calc(var(--fs) * 0.917)); height: 2lh; }
-  .oracle { flex-grow: 1000000; }
-  .strip { flex-grow: 1000; }
+  .portrait-summary { gap: 4px clamp(8px, 1vw, 16px); padding-block: 4px; }
   .quick-strip { display: flex; align-items: center; min-width: 0; }
   .chips { min-width: 0; overflow-x: auto; scrollbar-width: none; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .chip-track { display: flex; width: max-content; gap: 2px; padding: 4px 3px; }
@@ -220,7 +263,7 @@
   .scroll:hover:enabled { background: var(--surface); color: var(--bright); }
   .scroll:disabled { color: var(--faint); }
   .coin { font-weight: 600; font-size: calc(var(--fs) * 1.167); background: none; padding: 4px 0; color: var(--bright); }
-  .stat { display: flex; flex-direction: column; font-size: max(8px, calc(var(--fs) * 0.917)); }
+  .stat { display: flex; flex-direction: column; line-height: 1.35; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .chip { display: flex; gap: 4px; align-items: baseline; padding: 4px 6px; background: none; color: var(--dim); }
   .chip[aria-current='true'] { background: var(--surface); color: var(--bright); }
   .chip .coin { font-weight: 600; }
@@ -237,9 +280,6 @@
   .bar .logo { border-radius: var(--radius); }
   .bar [data-testid='settings-button'] { background: none; border: 1px solid var(--line); border-radius: var(--radius); font-size: calc(var(--fs) * 1.333); }
   .spacer { flex: 1 0 0; }
-  .price { container-type: inline-size; }
-  .price .day { white-space: nowrap; }
-  @container (max-width: 9em) { .price .abs { display: none; } }
   .bar .chip[aria-current='true'] { background: none; }
   .bar .chip[aria-current='true'] .coin { color: var(--accent); }
   .connect { background: var(--accent); color: var(--bg); font-weight: 600; padding: 6px 14px; border-radius: var(--radius); }

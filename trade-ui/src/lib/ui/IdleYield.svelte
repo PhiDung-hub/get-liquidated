@@ -107,8 +107,10 @@
 </script>
 
 <section bind:this={root} data-testid="idle-yield" aria-label="Idle-asset yield">
-  <h4>Idle-asset yield</h4>
-  {#if rateAt}<p class="dim note" data-testid="idle-yield-updated" title="Hyperliquid native lending supply rates">Updated <time datetime={new Date(rateAt).toISOString()}>{new Date(rateAt).toLocaleTimeString()}</time></p>{/if}
+  <header>
+    <h4>Idle-asset yield</h4>
+    {#if rateAt}<p class="dim note" data-testid="idle-yield-updated" title="Hyperliquid native lending supply rates">Updated <time datetime={new Date(rateAt).toISOString()}>{new Date(rateAt).toLocaleTimeString()}</time></p>{/if}
+  </header>
   {#if loading}<p class="dim" data-testid="idle-yield-loading">Loading current supply rates…</p>{/if}
   {#if stale}<p class="warn" data-testid="idle-yield-stale">Stale · showing last available values</p>{/if}
   {#if rateError || supplyError}<p class="warn" data-testid="idle-yield-error" role="status">{rateError} {supplyError} Retries while visible every 60s.</p>{/if}
@@ -130,15 +132,16 @@
 </section>
 
 <style>
-  section { margin-top: 8px; }
-  h4 { margin: 0 0 4px; font-size: var(--fs); font-weight: 500; color: var(--bright); }
+  section { min-width: 0; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; align-items: baseline; margin-bottom: 4px; }
+  h4 { margin: 0; font-size: var(--fs); font-weight: 500; color: var(--bright); }
   p { margin: 3px 0; line-height: 1.4; }
   table { width: 100%; font-size: max(8px, calc(var(--fs) * 0.917)); font-variant-numeric: tabular-nums; }
   th, td { padding: 3px 0; text-align: right; }
   th:first-child, td:first-child { text-align: left; min-width: 5ch; }
   td.estimate { text-align: right; white-space: normal; overflow-wrap: anywhere; }
   .estimate strong { font-weight: 600; }
-  abbr { cursor: help; text-decoration: underline dotted var(--dim); text-underline-offset: 3px; }
-  .note { font-size: max(8px, calc(var(--fs) * 0.917)); }
+  abbr { text-decoration: underline dotted var(--dim); text-underline-offset: 3px; }
+  .note { margin: 0; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .warn { color: var(--warn); overflow-wrap: anywhere; }
 </style>

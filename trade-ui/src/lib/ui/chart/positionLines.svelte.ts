@@ -4,17 +4,19 @@ import { MediaQuery, SvelteSet } from 'svelte/reactivity';
 import { liqDist, positionOf, type Position } from '$lib/account/inventory.svelte';
 import { isTrailing, openOrders, type OpenOrder } from '$lib/account/orders.svelte';
 import { market } from '$lib/market/market.svelte';
-import { meta } from '$lib/market/meta.svelte';
+import { meta, quoteOf } from '$lib/market/meta.svelte';
 import { cancelOpenOrder, chaseOwning } from '$lib/orders/chase.svelte';
-import { addPositionExit, exitRefusal, hasExit, moveOrder, moveRefusal } from '$lib/orders/execute';
+import { addPositionExit, closePosition, moveOrder, moveRefusal, positionExitForDrag } from '$lib/orders/execute';
+import { closing } from '$lib/orders/ticket.svelte';
 import { editable, editOrder } from '$lib/ui/order/EditOrderModal.svelte';
-import { session } from '$lib/session/session.svelte';
+import { session, viewAddress } from '$lib/session/session.svelte';
 import { ui } from '$lib/ui/state.svelte';
 import { settings } from '$lib/settings/settings.svelte';
 import { priceDecimals, tickSize } from '$lib/signing/wire';
+import { net } from '$lib/transport/network';
 import { socket } from '$lib/transport/ws.svelte';
 import { toast } from '$lib/ui/toast.svelte';
-import { fmtPct, fmtPx, fmtSz, fmtUsd, fmtUsdShort, pxDecimals } from '$lib/util/format';
+import { fmtIn, fmtPct, fmtPx, fmtSz, fmtUsd, fmtUsdShort, pxDecimals } from '$lib/util/format';
 import { extremes, type Pt } from './extremes.svelte';
 
 type Kind = 'position' | 'liq' | 'order' | 'exit' | 'mfe' | 'mae';
@@ -24,7 +26,7 @@ interface Label extends Line, Tag { x: boolean; drag: boolean; busy: boolean; gr
 interface Row { key: string; o: OpenOrder; cells: string[]; filled: number; projected: number; pnl?: number; phase: 'close' | 'flip' | 'add' | 'open'; x: boolean; busy: boolean; under: boolean }
 interface Group extends Tag { buy: boolean; text: string; members: string[]; rows: Row[]; up: boolean; room: number; vx: number; vy: number; span: number }
 export interface Box { top: number; bot: number; left: number; w: number; t?: Tag; hit?: boolean }
-interface Held { coin: string; key: string; from: number; px: number; ghost: IPriceLine; sent: boolean; why: string; end: () => void }
+interface Held { coin: string; key: string; from: number; px: number; ghost: IPriceLine; sent: boolean; why: string; end: () => void; positionContext?: string; exit?: ReturnType<typeof positionExitForDrag> }
 const PAD = 8;
 const GAP = 4;
 const SETTLE = 400;
@@ -45,6 +47,14 @@ export const lineLabels = $state({ list: [] as Label[], groups: [] as Group[], o
 export const toggleGroup = (key: string) => (lineLabels.open = lineLabels.open === key ? '' : key);
 // Oids in flight or confirmed cancelled; an oid is never reused, so a confirmed one stays disabled until its order leaves the feed.
 const cancelling = new SvelteSet<number>();
+
+/** The position label's ✕: the whole chart position at market, as `c` sends it. */
+export async function closeLine(coin: string) {
+  closing.n++;
+  try { await closePosition(coin, 'market'); }
+  catch (e) { toast.error((e as Error).message); }
+  finally { closing.n--; }
+}
 
 export function cancelLine(o: OpenOrder) {
   cancelling.add(o.oid);
@@ -70,12 +80,12 @@ function orderLine(o: OpenOrder, p: Position | undefined, dec: number | undefine
   return { key: `o${o.oid}`, kind: 'order', price, parts, buy: o.side === 'B', o, sz, tag: !o.isTrigger, est, pnl, hint };
 }
 
-/** The whole-position TP (px on the profit side of mark) or SL a position-label drag would place at px. */
-function exitLine(p: Position, px: number, dec: number | undefined): Line {
+/** The TP or SL a position-label drag would place or move to px. */
+function exitLine(p: Position, px: number, dec: number | undefined, existing?: OpenOrder): Line {
   const long = p.szi > 0;
   const tp = long === px > (market.ctx?.markPx ?? p.entryPx);
   const o = { coin: p.coin, side: long ? 'A' : 'B', isTrigger: true, orderType: tp ? 'Take Profit Market' : 'Stop Market', reduceOnly: true, sz: 0, limitPx: px, triggerPx: px, tif: null } as OpenOrder;
-  return { ...orderLine(o, p, dec), key: 'exit', kind: 'exit', o: undefined };
+  return { ...orderLine(existing ?? o, p, dec, px), key: 'exit', kind: 'exit', o: undefined };
 }
 
 /** The best (MFE) and worst (MAE) PnL since the position opened, at the price it was seen, as a share of the largest cost basis held by then, with R against the SL nearest the entry while that SL risks a loss. */
@@ -97,7 +107,7 @@ function extremeLines(p: Position, dec: number | undefined): Line[] {
 }
 
 /** The coin's lines, resting limits' tags first (they sit under every other label); a held drag shows its order's label at the held price, or for the position the exit it would place, with why that would be refused in place of its PnL. */
-function linesFor(coin: string, held?: { key: string; px: number; why?: string } | null): Line[] {
+function linesFor(coin: string, held?: Held | null): Line[] {
   const dec = meta.byName.get(coin)?.szDecimals;
   const found = positionOf(coin);
   const p = found?.szi ? found : undefined;
@@ -108,8 +118,17 @@ function linesFor(coin: string, held?: { key: string; px: number; why?: string }
   const [tags, orders] = [all.filter((l) => l.tag), all.filter((l) => !l.tag)];
   if (!p) return [...tags, ...orders];
   const pos: Line = { key: 'position', kind: 'position', price: round(p.entryPx, dec), parts: [`PnL ${fmtUsdShort(p.uPnl)}`, fmtSz(p.szi, dec)], hint: `Funding since open: ${fmtUsd(-p.fundingSinceOpen)} (positive received, negative paid)`, buy: p.szi > 0, pnl: p.uPnl, gain: market.ctx?.markPx ? (market.ctx.markPx - p.entryPx) * Math.sign(p.szi) : p.uPnl };
-  const liq: Line[] = p.liqPx ? [{ key: 'liq', kind: 'liq', price: round(p.liqPx, dec), parts: [`Liq ${fmtPx(p.liqPx, dec)} · ${liqDist(p)}`], buy: false }] : [];
-  const exit = held?.key === 'position' ? [refused(exitLine(p, held.px, dec))] : [];
+  const liq: Line[] = [];
+  if (p.liqPx && p.liqPx > 0) {
+    const price = `Liq ${fmtPx(p.liqPx, dec)}`;
+    const distance = liqDist(p);
+    const pnl = p.entryPx > 0 ? (p.liqPx - p.entryPx) * p.szi : NaN;
+    const quote = quoteOf(p.coin);
+    const amount = Number.isFinite(pnl) ? quote === 'USDC' ? fmtUsdShort(pnl) : fmtIn(pnl, quote) : '';
+    const hint = amount ? `Estimated PnL from entry if the full position fills at the liquidation price: ${fmtIn(pnl, quote)}.\n\nHyperliquid charges no separate liquidation fee. The mark triggers liquidation. Orders execute against available liquidity, so fill prices can differ from the mark and the displayed book quotes. A backstop liquidation forfeits the maintenance margin.` : undefined;
+    liq.push({ key: 'liq', kind: 'liq', price: round(p.liqPx, dec), parts: amount ? [price, amount, `· ${distance}`] : [`${price} · ${distance}`], buy: false, est: amount, pnl, hint });
+  }
+  const exit = held?.key === 'position' ? [refused(exitLine(p, held.px, dec, held.exit?.order))] : [];
   return [...tags, pos, ...liq, ...orders, ...exit, ...extremeLines(p, dec)];
 }
 
@@ -132,10 +151,13 @@ function clusters(list: Label[], h: number, y: (t: Label) => number | null, held
 }
 
 /** Anchor the tag at the nearest visible order and list the run in fill order, from the market outward. */
-function groupOf(run: Label[], coin: string, dec: number | undefined, fits: (y: number) => boolean): Group {
+function groupOf(run: Label[], coin: string, dec: number | undefined, paneHeight: number, labelHeight: number): Group {
   const byFillPrice = (a: Line, b: Line) => run[0].buy ? b.price - a.price : a.price - b.price;
   const rows = [...run].sort(byFillPrice);
-  const at = rows.find((t) => fits(t.y)) ?? rows.find((t) => t.y >= 0) ?? rows[0];
+  const inset = Math.min(labelHeight, paneHeight) / 2;
+  const at = rows.find((t) => t.y >= inset && t.y <= paneHeight - inset) ?? rows.find((t) => t.y >= 0) ?? rows[0];
+  // If only an edge order is visible, keep the full group button inside the price pane.
+  const y = at.y < 0 ? at.y : Math.max(inset, Math.min(at.y, paneHeight - inset));
   const p = positionOf(coin);
   let position = p?.szi ?? 0;
   const projections = new Map<string, { position: number; filled: number; phase: Row['phase']; transition: string; pnl?: number }>();
@@ -162,7 +184,7 @@ function groupOf(run: Label[], coin: string, dec: number | undefined, fits: (y: 
     const projection = projections.get(t.key)!;
     return { key: t.key, o: t.o!, cells: [fmtPx(t.price, dec, spot), fmtSz(t.sz ?? 0, dec), projection.transition], filled: projection.filled, projected: projection.position, pnl: projection.pnl, phase: projection.phase, x: t.x, busy: t.busy, under: true };
   };
-  return { key: `g${at.key}`, price: at.price, buy: at.buy, text, members: run.map((t) => t.key), rows: rows.map(row), under: false, y: at.y, left: PAD, w: 0, up: false, room: 0, vx: 0, vy: 0, span: 0 };
+  return { key: `g${at.key}`, price: at.price, buy: at.buy, text, members: run.map((t) => t.key), rows: rows.map(row), under: false, y, left: PAD, w: 0, up: false, room: 0, vx: 0, vy: 0, span: 0 };
 }
 
 export const meets = (a: Box, gap: number) => (b: Box) => a.top < b.bot && b.top < a.bot && a.left < b.left + b.w + gap && b.left < a.left + a.w + gap;
@@ -200,17 +222,35 @@ function slot(y: number, w: number, h: number, home: number, bs: Box[]) {
 /** Draws the chart coin's position, liquidation and resting-order lines on `series` and keeps each one's label on its line, packed from the left so candles stay clear, left of x `newest()` (the newest bars) when that leaves over half the pane; kick() makes them follow a price scale change. Mirrors them into el's data-lines, and the position's MFE and MAE lines into data-extremes. */
 export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement, newest: () => number | null, inset = () => 0, legendBottom = () => Infinity) {
   const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const color = { buy: css('--buy'), sell: css('--sell'), neutral: css('--dim') };
+  const orderBadge = (side: string, panel: string) => {
+    const channels = [1, 3, 5].map((i) => {
+      const background = parseInt(panel.slice(i, i + 2), 16);
+      const foreground = parseInt(side.slice(i, i + 2), 16);
+      return Math.round(background + (foreground - background) * 0.28);
+    });
+    return `rgb(${channels.join(', ')})`;
+  };
+  const palette = () => {
+    const buy = css('--buy'), sell = css('--sell'), panel = css('--panel');
+    return { buy, sell, neutral: css('--dim'), bright: css('--bright'), orderBuy: orderBadge(buy, panel), orderSell: orderBadge(sell, panel) };
+  };
+  let color = palette();
   let drawn = new Map<string, { line: IPriceLine; l: Line }>();
   let held: Held | null = null;
   const ghostColor = (l: Line, why = '') => (l.buy !== (l.kind === 'position') ? color.buy : color.sell) + (why ? '50' : '');
-  const style = (l: Line, faint = false, end = false) => {
+  const style = (l: Line, groupedOrder = false, end = false) => {
     const gain = l.gain ?? 0;
     const base = l.kind === 'position' ? gain > 0 ? color.buy : gain < 0 ? color.sell : color.neutral : l.buy ? color.buy : color.sell;
-    const alpha = faint ? '30' : l.kind === 'position' ? '99' : quiet(l) ? '80' : '';
-    return { color: base + alpha, axisLabelVisible: !quiet(l) && (!faint || end), axisLabelColor: faint ? base : '' };
+    const order = l.kind === 'order';
+    const alpha = order ? '30' : l.kind === 'position' ? '99' : quiet(l) ? '80' : '';
+    return {
+      color: base + alpha,
+      axisLabelVisible: !quiet(l) && (!groupedOrder || end),
+      axisLabelColor: order ? l.buy ? color.orderBuy : color.orderSell : '',
+      axisLabelTextColor: order ? color.bright : ''
+    };
   };
-  // A grouped order keeps a faint line; only a group's lowest and highest orders keep an axis label. Lines are restyled only when the groups change.
+  // Only a group's lowest and highest orders keep an axis label.
   let sig = '';
   let grouped = new Set<string>();
   let ends = new Set<string>();
@@ -274,7 +314,7 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
     const paneH = series.getPane().getHeight();
     for (const t of lineLabels.list) t.y = yOf(t.price);
     const dec = meta.byName.get(market.coin)?.szDecimals;
-    regroup(clusters(lineLabels.list, h, (t) => series.priceToCoordinate(t.price), held?.key).map((run) => groupOf(run, market.coin, dec, (y) => y >= h / 2 && y <= paneH - h / 2)));
+    regroup(clusters(lineLabels.list, h, (t) => series.priceToCoordinate(t.price), held?.key).map((run) => groupOf(run, market.coin, dec, paneH, h)));
     // Legend text sits only above the price pane's first labels and under its bottom edge (the volume legend), so it is measured only when a label is there.
     const single = lineLabels.list.filter((t) => !t.group);
     banded = [...single, ...lineLabels.groups].some((t) => t.y >= 0 && (t.y - h / 2 < legendBottom() || t.y + h / 2 > paneH));
@@ -358,9 +398,9 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
   const relabel = () => {
     const w = new Map(untrack(() => lineLabels.list.map((t) => [t.key, t])));
     const want = settings.chart.indicators.positions.on ? linesFor(market.coin, held) : [];
-    const busy = (l: Line) => !!l.o && (cancelling.has(l.o.oid) || (!!held?.sent && held.key === l.key));
-    const drag = (l: Line) => movable() && (l.kind === 'position' ? !(hasExit(market.coin, true) && hasExit(market.coin, false)) : l.kind === 'order' && !chased(l.o));
-    lineLabels.list = want.map((l) => ({ ...l, x: !!l.o && trade(), drag: drag(l), busy: busy(l), under: false, y: -1, left: PAD, w: w.get(l.key)?.w ?? 0, group: w.get(l.key)?.group ?? '', cap: 0, over: false }));
+    const busy = (l: Line) => (l.kind === 'position' && closing.n > 0) || (!!l.o && (cancelling.has(l.o.oid) || (!!held?.sent && (held.key === l.key || held.exit?.order?.oid === l.o.oid))));
+    const drag = (l: Line) => movable() && (l.kind === 'position' || (l.kind === 'order' && !chased(l.o)));
+    lineLabels.list = want.map((l) => ({ ...l, x: (!!l.o || l.kind === 'position') && trade(), drag: drag(l), busy: busy(l), under: false, y: -1, left: PAD, w: w.get(l.key)?.w ?? 0, group: w.get(l.key)?.group ?? '', cap: 0, over: false }));
     untrack(follow);
     untrack(kick);
   };
@@ -391,17 +431,37 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
   // 'top': on 'normal' a study line crossing the order line (a later series) wins the hover, though the press still grabs the order; the tools' primitive, attached first, still wins ties as its press does.
   const cursor: ISeriesPrimitive<Time> = { hitTest: (_x, y) => ((held ? !held.sent : near(y)) ? { externalId: 'order-line', zOrder: 'top', cursorStyle: 'ns-resize' } : null) };
   series.attachPrimitive(cursor);
+  const positionContext = (coin: string) => {
+    const p = positionOf(coin);
+    return JSON.stringify([viewAddress(), net.current, p?.szi, p?.entryPx]);
+  };
+  const planExit = (h: Held) => {
+    if (h.positionContext !== positionContext(h.coin)) throw new Error('Position or account changed: drag again');
+    return positionExitForDrag(h.coin, h.px);
+  };
   const drop = () => {
     const h = held!;
     const t = lineLabels.list.find((l) => l.key === h.key);
     if (!t || h.why || Math.abs(h.px - h.from) < tickSize(h.from, tickOf()) / 2) return release();
     if (socket.state !== 'open') return toast.error('socket down: order not moved'), release();
+    let o = t.o;
+    if (h.positionContext !== undefined) {
+      try {
+        const exit = planExit(h);
+        if (!h.exit || exit.tp !== h.exit.tp || JSON.stringify(exit.order) !== JSON.stringify(h.exit.order))
+          throw new Error('Exit orders changed: drag again');
+        o = exit.order;
+        if (o && h.px === o.triggerPx) return release();
+      } catch (err) {
+        toast.error((err as Error).message);
+        return release();
+      }
+    }
     h.sent = true;
     show();
-    const o = t.o;
     (o ? moveOrder(o, h.px) : addPositionExit(h.coin, h.px))
       .catch((err) => (toast.error(err?.message || 'failed'), false))
-      .then((ok) => (ok && o ? setTimeout(() => held === h && release(), HOLD) : held === h && release()));
+      .then((ok) => (ok ? setTimeout(() => held === h && release(), HOLD) : held === h && release()));
   };
   /** A clicked label opens its editor: a resting limit's Edit, or the position TP/SL sheet at a reduce-only TP or SL that closes the position. */
   const edit = (o: OpenOrder) => {
@@ -413,22 +473,28 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
   const grab = (e: MouseEvent): boolean => {
     const t = e.button === 0 && !e.shiftKey && !held ? labelAt(e) : undefined;
     if (!t?.drag) return false;
+    const coin = market.coin;
+    const context = t.kind === 'position' ? positionContext(coin) : undefined;
     // The line moves by the pointer's travel, so a grab off-centre neither jumps it nor moves it on a release back at the press.
     const y0 = (series.priceToCoordinate(t.price) ?? t.y) - e.clientY;
     // A click with a jitter, or a sideways pan started on a line, moves nothing.
     const start = (m: MouseEvent) => {
       const [dx, dy] = [Math.abs(m.clientX - e.clientX), Math.abs(m.clientY - e.clientY)];
       if (Math.max(dx, dy) < DEAD) return false;
-      if (dx > dy) return cancel(), false;
+      if (dx > dy || coin !== market.coin) return cancel(), false;
       const ghost = series.createPriceLine({ price: t.price, title: '', color: ghostColor(t), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true });
-      held = { coin: market.coin, key: t.key, from: t.price, px: t.price, ghost, sent: false, why: '', end };
+      held = { coin, key: t.key, from: t.price, px: t.price, ghost, sent: false, why: '', end, positionContext: context };
       return true;
     };
     const move = (m: MouseEvent) => {
       const px = held || start(m) ? snap(y0 + m.clientY) : null;
       if (!held || px === null) return;
       held.px = px;
-      held.why = t.o ? moveRefusal(t.o, px) : exitRefusal(held.coin, px);
+      held.why = t.o ? moveRefusal(t.o, px) : '';
+      if (held.positionContext !== undefined) {
+        try { held.exit = planExit(held); }
+        catch (err) { held.exit = undefined; held.why = (err as Error).message; }
+      }
       held.ghost.applyOptions({ price: px, color: ghostColor(t, held.why) });
       show();
     };
@@ -458,9 +524,7 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
       void tick().then(() => {
         if (cancelled) return;
         untrack(() => {
-          color.buy = css('--buy');
-          color.sell = css('--sell');
-          color.neutral = css('--dim');
+          color = palette();
           restyle();
           el.dataset.entryPriceColor = drawn.get('position')?.line.options().color ?? '';
           if (held) {
@@ -483,11 +547,15 @@ export function positionLines(series: ISeriesApi<'Candlestick'>, el: HTMLElement
       void settings.display.fs;
       lineLabels.size = Math.round(parseFloat(getComputedStyle(el).getPropertyValue('--fs')) * 1.4);
       relabel();
-      const now = held && want.find((l) => l.key === held!.key);
       // A sent move ends once the feed shows it; a drag whose order left the feed, or that may no longer drag, is dropped unsent.
-      const done = held && (!movable() || held.coin !== market.coin || !now || (held.sent && now.price === held.px));
-      if (done && !held!.sent) toast.error('order changed: drag cancelled, nothing sent');
-      if (done) untrack(release);
+      const h = held;
+      const now = h && want.find((l) => l.key === h.key);
+      const exit = h?.exit;
+      const exitShown = h?.sent && exit && want.some(({ o }) => o?.isTrigger && o.reduceOnly && !isTrailing(o) && o.side === exit.side && o.triggerPx === h.px && o.orderType.startsWith('Take') === exit.tp);
+      if (h && (!movable() || h.coin !== market.coin || !now || (h.positionContext !== undefined && h.positionContext !== positionContext(h.coin)) || (h.sent && (exit ? exitShown : now.price === h.px)))) {
+        if (!h.sent) toast.error('order changed: drag cancelled, nothing sent');
+        untrack(release);
+      }
     });
     // Esc (once no overlay takes it) or a press outside the group's label and list closes the list.
     $effect(() => {

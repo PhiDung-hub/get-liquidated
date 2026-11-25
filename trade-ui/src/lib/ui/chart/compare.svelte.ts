@@ -44,7 +44,7 @@ const point = (b: Bar) => ({ time: (b.time / 1000) as UTCTimestamp, value: b.clo
  * Draws each compared market as a line on the left price scale: its own price for one, % change from the first visible bar for two or more.
  * Points are kept to the main candles' bar times, so bar indices (drawings, the measure, labels) stay the main series'.
  */
-export function compareLines(chart: IChartApi, main: ISeriesApi<'Candlestick'>, bars: () => Bar[], el: HTMLElement, onLayout: () => void) {
+export function compareLines(chart: IChartApi, main: ISeriesApi<'Candlestick'>, bars: () => Bar[], enabled: () => boolean, el: HTMLElement, onLayout: () => void) {
   const lines = new Map<string, Line>();
   const failed = new Set<string>();
   /** Failed coins whose candles HL refused: their legend row stays, valued —, so a saved compare never vanishes on a rate limit. */
@@ -202,7 +202,7 @@ export function compareLines(chart: IChartApi, main: ISeriesApi<'Candlestick'>, 
     $effect(() => {
       const coin = market.coin;
       const interval = settings.chart.interval;
-      const want = compared(coin).filter((c) => c !== coin);
+      const want = enabled() ? compared(coin).filter((c) => c !== coin) : [];
       void [meta.byName, meta.loaded, meta.hip3, socket.state];
       untrack(() => sync(`${coin}|${interval}`, interval, want));
     });

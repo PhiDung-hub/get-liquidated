@@ -1,7 +1,7 @@
 import { info } from '$lib/transport/info';
 import { rateLimited } from '$lib/transport/ws.svelte';
 import { net } from '$lib/transport/network';
-import { arr, num, str } from '$lib/util/parse';
+import { arr, num } from '$lib/util/parse';
 import { idbDelete, idbGetWithin, idbPut, rememberKey } from '$lib/util/storage';
 import type { Bar } from './candles';
 import type { Num } from './indicators';
@@ -81,34 +81,6 @@ export async function fundingHistory(coin: string, from: number): Promise<Fundin
   await p;
   const first = c.rows[0]?.time ?? Infinity;
   return { rows: c.rows, since: c.done.includes(Math.floor(first / CHUNK) * CHUNK - CHUNK) ? -Infinity : Math.floor(first / HOUR) * HOUR - HOUR };
-}
-
-export type Prediction = { venue: string; rate: number; hours: number | null; nextTime: number | null; fetchedAt: number };
-type Predictions = { at: number; data: Map<string, Prediction[]>; pending?: Promise<Map<string, Prediction[]>> };
-const predictions = new Map<string, Predictions>();
-/** HL's predicted rates per venue, one request for every coin, reused for a minute. */
-export async function predictedFunding(coin: string): Promise<Prediction[]> {
-  if (!predictions.has(net.current)) predictions.set(net.current, { at: 0, data: new Map() });
-  const cache = predictions.get(net.current)!;
-  if (Math.floor(Date.now() / 60_000) === Math.floor(cache.at / 60_000)) return cache.data.get(coin) ?? [];
-  cache.pending ??= fundingInfo({ type: 'predictedFundings' }).then((raw) => {
-    const fetchedAt = Date.now();
-    const data = new Map(arr<any>(raw, 'predicted fundings').map((entry): [string, Prediction[]] => {
-      const [name, venues] = arr<any>(entry, 'funding prediction');
-      return [str(name, 'coin'), arr<any>(venues, 'funding venues').flatMap((entry) => {
-        const [venue, r] = arr<any>(entry, 'venue prediction');
-        if (r == null) return [];
-        const hours = r.fundingIntervalHours == null ? null : num(r.fundingIntervalHours, 'funding interval');
-        const nextTime = r.nextFundingTime == null ? null : num(r.nextFundingTime, 'next funding time');
-        if (hours !== null && !(hours > 0)) throw new Error('funding interval must be positive');
-        if (nextTime !== null && (!Number.isSafeInteger(nextTime) || nextTime <= 0 || nextTime > 8.64e15)) throw new Error('invalid next funding time');
-        return [{ venue: str(venue, 'venue'), rate: num(r.fundingRate, 'predicted rate'), hours, nextTime, fetchedAt }];
-      })];
-    }));
-    [cache.at, cache.data] = [fetchedAt, data];
-    return data;
-  }).finally(() => (cache.pending = undefined));
-  return (await cache.pending).get(coin) ?? [];
 }
 
 /**

@@ -18,9 +18,9 @@
   const narrow = new MediaQuery('max-width: 900px');
   // A slim desktop column (under 240px) drops Total too, so the book can give the chart its width.
   const full = $derived(totals || (!narrow.current && (!width || width >= 240)));
+  const compact = $derived(!narrow.current && width > 0 && width < 270);
   const quoteSize = $derived(settings.book.sizeUnit === 'usd');
   const sizeUnit = $derived(quoteSize ? quoteOf(market.coin) : symOf(market.coin));
-  const unit = $derived(full ? ` (${sizeUnit})` : '');
   const dec = $derived(meta.byName.get(market.coin)?.szDecimals);
   // A row reads 4 significant figures, never more than the coin's own decimals: 0.00048 keeps them, 25.98245 reads 25.98.
   const depth = (n: number) => (dec === undefined ? fmtSz(n) : fmtSz(n, Math.min(dec, Math.max(0, 3 - Math.floor(Math.log10(Math.abs(n) || 1))))));
@@ -43,7 +43,7 @@
   const asks = $derived(withTotals(book.asks, true));
   const bids = $derived(withTotals(book.bids));
   const amount = (level: (typeof bids)[number], cumulative = false) => quoteSize ? Number((cumulative ? level.notional : level.px * level.sz).toFixed(isSpot(market.coin) ? 8 : 6)) : cumulative ? level.total : level.sz;
-  const formatAmount = (n: number) => quoteSize ? quoteDepth(n) : depth(n);
+  const formatAmount = (n: number) => quoteSize ? quoteDepth(n) : compact && Math.abs(n) >= 100000 ? fmtCompact(n) : depth(n);
   const hasRows = $derived(asks.length + bids.length > 0);
   const max = $derived(Math.max(asks[0] ? amount(asks[0], true) : 0, bids.at(-1) ? amount(bids.at(-1)!, true) : 0) || 1);
   // Grouped buckets floor bids and ceil asks, so the live bbo inside the best bucket is the active price that row shows.
@@ -103,13 +103,13 @@
   }
 </script>
 
-<div class="ob" class:totals bind:clientWidth={width} data-testid="book" data-time={book.time} data-coin={market.coin} data-unit={sizeUnit} data-rows={w}>
+<div class="ob" class:full class:compact bind:clientWidth={width} data-testid="book" data-time={book.time} data-coin={market.coin} data-unit={sizeUnit} data-rows={w}>
   <div class="head">
     <div class="bins">
       {#if active}<Menu value={String(active.step)} options={menu} onpick={chooseBin} testid="book-bins" ariaLabel="Book bins" align="left" />{:else}<span></span>{/if}
       <Menu value={settings.book.sizeUnit} options={sizeOptions} onpick={chooseSizeUnit} testid="book-unit" ariaLabel="Book size unit" dropdown />
     </div>
-    <div class="cols"><span>Price</span><span>Size{unit}</span>{#if full}<span>Total{unit}</span>{/if}</div>
+    <div class="cols"><span>Price</span><span>Size</span>{#if full}<span>Total</span>{/if}</div>
   </div>
   <div class="ladder" role="group" aria-label="Order book levels" style:--rows={w} bind:this={ladder} onpointerleave={() => (hovered = null)}>
     {#each asks as l (l.rank)}
@@ -138,14 +138,16 @@
 </div>
 
 <style>
-  .ob { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: var(--fs); }
+  .ob { --book-columns: repeat(2, minmax(0, 1fr)); display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: var(--fs); }
+  .ob.full { --book-columns: repeat(3, minmax(0, 1fr)); }
   .bins { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 1.4em; padding: 2px 8px 0; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 2px 8px 0; color: var(--dim); text-align: right; }
+  .cols, .row { grid-template-columns: var(--book-columns); }
+  .cols { display: grid; padding: 2px 8px 0; color: var(--dim); text-align: right; }
   .cols span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cols span:first-child { text-align: left; }
   .ladder { flex: 1; min-height: 0; display: grid; overflow: hidden; contain: strict; grid-template-columns: minmax(0, 1fr); grid-template-rows: repeat(var(--rows), minmax(0, 1fr)) auto repeat(var(--rows), minmax(0, 1fr)); }
   .row {
-    display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; width: 100%; padding: 1px 8px; border-radius: 0; text-align: right;
+    display: grid; align-items: center; width: 100%; padding: 1px 8px; border-radius: 0; text-align: right;
     background: linear-gradient(to left, color-mix(in srgb, var(--sell) 7%, transparent) var(--w), transparent var(--w));
   }
   .row.bid { background: linear-gradient(to left, color-mix(in srgb, var(--buy) 7%, transparent) var(--w), transparent var(--w)); }
@@ -163,10 +165,13 @@
   }
   .reach-tip b { font-weight: 400; text-align: right; color: var(--bright); }
   .spread { grid-row: calc(var(--rows) + 1); display: flex; justify-content: center; gap: 24px; padding: 3px; border-block: 1px solid var(--gutter); }
+  .ob.compact { font-size: min(var(--fs), 13px); }
+  .compact :is(.bins, .cols, .row) { padding-inline: 5px; }
+  .compact :is(.cols, .row) { column-gap: 4px; }
+  .compact .spread { gap: 8px; }
   @media (max-width: 900px) {
     .ob { font-size: max(8px, calc(var(--fs) * 0.833)); }
-    .cols, .row { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 6px; padding-inline: 4px; }
-    .totals :is(.cols, .row) { grid-template-columns: 1fr 1fr 1fr; }
+    .cols, .row { column-gap: 6px; padding-inline: 4px; }
     .bins { padding: 0 4px; }
     .spread > :first-child { display: none; }
     .spread { gap: 8px; }

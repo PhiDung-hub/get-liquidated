@@ -317,18 +317,19 @@
 
 <style>
   .scrim { position: fixed; inset: 0; background: #000c; z-index: 20; }
-  .settings { position: fixed; inset: 4vh 50% auto auto; transform: translateX(50%); width: min(1000px, calc(100vw - 32px)); max-height: 92vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; z-index: 21; font-size: var(--fs); }
-  header { display: flex; gap: 8px; align-items: center; }
-  h3 { margin: 0 12px 0 0; }
-  h4 { margin: 0 0 6px; color: var(--bright); font-weight: 600; }
+  .settings { position: fixed; inset: 4vh 50% auto auto; transform: translateX(50%); width: min(1000px, calc(100vw - 32px)); max-height: 92vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: calc(var(--radius) + 4px); padding: clamp(12px, 2vw, 18px); z-index: 21; font-size: var(--fs); }
+  header { display: flex; gap: 10px; align-items: center; }
+  h3 { margin: 0 4px 0 0; color: var(--bright); font-size: 1.2em; }
+  h4 { margin: 0 0 8px; color: var(--bright); font-weight: 650; }
+  header > button:last-child { color: var(--bright); }
   header .sure { color: var(--sell-text); font-weight: 600; }
   .msg { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--warn); }
   .migration-link { margin-top: 10px; }
-  .tabs { display: flex; gap: 4px; margin-top: 10px; border-bottom: 1px solid var(--line); }
-  .tabs button { padding: 7px 12px; }
+  .tabs { display: flex; gap: 4px; margin-top: 12px; }
+  .tabs button { padding: 7px clamp(7px, 2.5vw, 12px); }
   .hotkey-tabs { flex-wrap: wrap; }
   .hotkey-tabs button { flex: none; }
-  .hotkey-group { margin-top: 12px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+  .hotkey-group { margin-top: 12px; }
   .hotkey-group .row { grid-template-columns: minmax(0, 1fr) minmax(70px, auto) auto auto; }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; align-items: start; }
   .cols > div { display: flex; flex-direction: column; gap: 12px; }
@@ -343,28 +344,28 @@
   .display-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 
   .exec { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); }
-  section { padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+  section, .hotkey-group { min-width: 0; padding: 10px 12px; background: color-mix(in srgb, var(--surface) 48%, var(--panel)); border: 1px solid var(--line); border-radius: calc(var(--radius) + 2px); }
   .row { display: grid; grid-template-columns: 1fr 70px auto auto; gap: 6px; align-items: center; padding: 1px 0; }
   .keys { font-family: var(--mono); color: var(--accent); }
   .keys.buy { color: var(--buy-text); }
   .keys.sell { color: var(--sell-text); }
   .row button { padding: 1px 6px; }
   .row button.on { background: var(--warn); color: var(--bg); }
-  label { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; align-items: center; padding: 2px 0; color: var(--dim); }
+  label { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; align-items: center; padding: 2px 0; color: var(--text); }
   label > input, label > select, label > .u { width: 100%; }
   label > input[type='checkbox'] { width: auto; justify-self: end; }
   .u { position: relative; display: flex; }
   .u input { width: 100%; padding-right: 2.4em; }
-  .u i { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); color: var(--faint); font-style: normal; pointer-events: none; }
+  .u i { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); color: var(--dim); font-style: normal; pointer-events: none; }
   .dim { color: var(--dim); }
-  .hks { display: grid; grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); gap: 5px 8px; align-items: center; color: var(--dim); }
+  .hks { display: grid; grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr); gap: 5px 8px; align-items: center; }
   .hks .keys { justify-self: start; padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); font-size: max(8px, 0.9em); }
   .hks h4 { grid-column: 1 / -1; }
   .hk { display: contents; }
   .keyrow { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
   .keyrow .keys { flex: none; padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); font-size: max(8px, 0.9em); }
-  .hk input, .hk select { min-width: 0; }
-  .hk > span { white-space: nowrap; }
+  .settings :is(input:not([type='checkbox']), select, textarea) { min-width: 0; color: var(--bright); }
+  .hk > .keys { white-space: nowrap; }
   .io { margin-top: 12px; }
   .io textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px; resize: vertical; font: max(8px, calc(var(--fs) * 0.917))/1.5 var(--mono); }
   @media (max-width: 600px) {

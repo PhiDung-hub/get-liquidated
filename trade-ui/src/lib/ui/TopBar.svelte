@@ -212,12 +212,9 @@
     </div>
     {@render quickOpen()}
     <button class="more" data-testid="ticker-more" aria-expanded={statsOpen} aria-label={statsOpen ? 'Hide market stats' : 'Show market stats'} onclick={(e) => (e.currentTarget.blur(), (statsOpen = !statsOpen))}>{statsOpen ? '▴' : '▾'}</button>
-    <div class="refs" data-testid="ticker-refs">
-      <span><abbr class="dim help-label" title={markHelp}>Mark</abbr> <span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></span>
-      {#if !spot}<span><abbr class="dim help-label" title={oracleHelp}>Oracle</abbr> <span class="num" data-testid="oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></span>{/if}
-    </div>
     {#if statsOpen}
       <div class="stats" data-testid="ticker-stats">
+        <div class="stat"><span class="dim">{spot ? 'Mark' : 'Mark / Oracle'}</span><span class="num"><span data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>{#if !spot}{' / '}<span data-testid="oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span>{/if}</span></div>
         {@render more()}
         {@render fundingStat()}
       </div>
@@ -295,7 +292,6 @@
   .price .big { font-size: calc(var(--fs) * 1.5); color: var(--bright); }
   .ticker .quick { margin: 0 -10px 0 0; min-width: 36px; min-height: 36px; padding: 0 2px; border: 1px solid var(--line); border-radius: var(--radius); letter-spacing: -1px; }
   .more { background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); }
-  .refs { grid-column: 1 / -1; display: flex; gap: 14px; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; padding: 6px 0 2px; }
   .stats .stat { line-height: 1.3; }
   .sock { display: flex; align-items: center; padding: 0 2px; }

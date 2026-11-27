@@ -1258,6 +1258,7 @@
     {/each}
     {#each lineLabels.list as t (t.key)}
       {@const quiet = t.kind === 'mfe' || t.kind === 'mae'}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div class="tag" class:buy={t.buy} class:fill={t.tag} class:under={t.under} class:drag={t.drag} class:quiet class:over={t.over} class:still={!t.tag && !t.drag && !t.x} class:shown={t.kind === 'position' && revealed > 0} onclick={t.kind === 'position' ? showClose : undefined} hidden={t.y < 0 || !!t.group} title={t.hint} data-help={t.kind === 'liq' && t.hint ? '' : undefined} data-testid={quiet ? 'extreme-tag' : 'line-tag'} data-kind={t.kind} data-key={t.key} data-tag={t.o?.oid} data-group={t.group || null} style:left="{t.left}px" style:transform="translate3d(0,{t.y}px,0) translateY(-50%)" style:height="{lineLabels.size}px" style:max-width={lineLabels.max <= 0 ? null : `${t.cap || lineLabels.max}px`} bind:offsetWidth={t.w}>
         {#if t.drag && !t.tag}<span class="grip" data-testid="line-grip" title={t.o ? 'Drag to move this order' : 'Drag to place or move a TP or SL'}>⋮</span>{' '}{/if}
         {#each t.parts as part, i}

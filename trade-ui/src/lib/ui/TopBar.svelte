@@ -2,6 +2,7 @@
   import { tick, untrack, type Snippet } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { market, selectCoin } from '$lib/market/market.svelte';
+  import { trades } from '$lib/market/trades.svelte';
   import { isSpot, meta, parseCtx, parseSpotCtx, quoteOf, symOf, type Ctx } from '$lib/market/meta.svelte';
   import { safe } from '$lib/market/watch.svelte';
   import { removeQuick, topChips } from '$lib/market/views.svelte';
@@ -42,6 +43,7 @@
   const quote = $derived(quoteOf(market.coin));
   const change = $derived(ctx ? (ctx.markPx - ctx.prevDayPx) / ctx.prevDayPx : NaN);
   const phone = new MediaQuery('max-width: 900px');
+  const lastPx = $derived(trades.list[0]?.px ?? ctx?.midPx ?? ctx?.markPx ?? 0);
   const diff = $derived(ctx ? ctx.markPx - ctx.prevDayPx : NaN);
   const dayMove = $derived.by(() => {
     if (!ctx || !Number.isFinite(diff)) return '—';
@@ -205,14 +207,17 @@
       {#if !spot && instrument?.maxLeverage}<span class="lev">{instrument.maxLeverage}x</span>{/if}
     </button>
     <div class="price">
-      <span class="num big" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>
+      <span class="num big" data-testid="last-price" title={trades.list[0] ? 'Last traded price' : 'Mid price'}>{lastPx ? fmtPx(lastPx, szDec, spot) : '—'}</span>
       <span class="num day" data-testid="day-change" class:buy={change >= 0} class:sell={change < 0}>{ctx ? `${dayMove} / ${fmtPct(change)}` : '—'}</span>
     </div>
     {@render quickOpen()}
     <button class="more" data-testid="ticker-more" aria-expanded={statsOpen} aria-label={statsOpen ? 'Hide market stats' : 'Show market stats'} onclick={(e) => (e.currentTarget.blur(), (statsOpen = !statsOpen))}>{statsOpen ? '▴' : '▾'}</button>
+    <div class="refs" data-testid="ticker-refs">
+      <span><abbr class="dim help-label" title={markHelp}>Mark</abbr> <span class="num" data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span></span>
+      {#if !spot}<span><abbr class="dim help-label" title={oracleHelp}>Oracle</abbr> <span class="num" data-testid="oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></span>{/if}
+    </div>
     {#if statsOpen}
       <div class="stats" data-testid="ticker-stats">
-        {#if !spot}<div class="stat"><span class="dim">Oracle</span><span class="num">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span></div>{/if}
         {@render more()}
         {@render fundingStat()}
       </div>
@@ -290,6 +295,7 @@
   .price .big { font-size: calc(var(--fs) * 1.5); color: var(--bright); }
   .ticker .quick { margin: 0 -10px 0 0; min-width: 36px; min-height: 36px; padding: 0 2px; border: 1px solid var(--line); border-radius: var(--radius); letter-spacing: -1px; }
   .more { background: none; border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); }
+  .refs { grid-column: 1 / -1; display: flex; gap: 14px; font-size: max(8px, calc(var(--fs) * 0.917)); }
   .stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; padding: 6px 0 2px; }
   .stats .stat { line-height: 1.3; }
   .sock { display: flex; align-items: center; padding: 0 2px; }

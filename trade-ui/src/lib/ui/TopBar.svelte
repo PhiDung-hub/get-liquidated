@@ -160,7 +160,7 @@
 {#snippet fundingStat()}
 {#if !spot}
   {#if phone.current}
-    <div class="stat"><abbr class="dim help-label" title={fundingHelp}>Funding</abbr><FundingRate rate={ctx?.funding ?? null} running={!inZen()} /></div>
+    <div class="stat"><abbr class="dim help-label" title={fundingHelp}>Funding / Countdown</abbr><FundingRate rate={ctx?.funding ?? null} running={!inZen()} separate /></div>
   {:else}
     <button class="stat funding-history" data-testid="market-funding-open" aria-haspopup="dialog" aria-label="Market funding history" data-help-detail={fundingHelp} onclick={() => (ui.overlay = 'marketFunding')}>
       <span class="dim help-label">Funding / Countdown</span><FundingRate rate={ctx?.funding ?? null} running={!inZen()} separate />
@@ -214,7 +214,7 @@
     <button class="more" data-testid="ticker-more" aria-expanded={statsOpen} aria-label={statsOpen ? 'Hide market stats' : 'Show market stats'} onclick={(e) => (e.currentTarget.blur(), (statsOpen = !statsOpen))}>{statsOpen ? '▴' : '▾'}</button>
     {#if statsOpen}
       <div class="stats" data-testid="ticker-stats">
-        <div class="stat"><span class="dim">{spot ? 'Mark' : 'Mark / Oracle'}</span><span class="num"><span data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>{#if !spot}{' / '}<span data-testid="oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span>{/if}</span></div>
+        <div class="stat"><abbr class="dim help-label" title={spot ? markHelp : `Mark: ${markHelp}\nOracle: ${oracleHelp}`}>{spot ? 'Mark' : 'Mark / Oracle'}</abbr><span class="num"><span data-testid="mark">{ctx ? fmtPx(ctx.markPx, szDec, spot) : '—'}</span>{#if !spot}{' / '}<span data-testid="oracle">{ctx?.oraclePx != null ? fmtPx(ctx.oraclePx, szDec) : '—'}</span>{/if}</span></div>
         {@render more()}
         {@render fundingStat()}
       </div>

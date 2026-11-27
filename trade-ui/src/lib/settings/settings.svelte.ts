@@ -37,7 +37,7 @@ export interface Settings {
   /** indicators: the display layers; studies: the chart's indicators in legend and pane order; favStudies: the Indicators dialog's starred types. */
   chart: { interval: Interval; pinnedIntervals: Interval[]; desktopPinnedIntervals: Interval[]; volume: boolean; timezone: string; indicators: { positions: { on: boolean }; fills: { on: boolean }; drawings: { on: boolean }; ai: { on: boolean } }; studies: Study[]; favStudies: string[]; compare: Record<string, string[]> };
   panel: { kind: TicketKind; sizeUnit: 'coin' | 'usd' };
-  display: { minimized: { trade: boolean; account: boolean; book: boolean; positions: boolean }; theme: ThemeId; fs: number; phoneTab: PhoneTab; zen: boolean; zenOpen: ZenOpen; superstar: boolean; lol: boolean; layout: Layout };
+  display: { minimized: { trade: boolean; account: boolean; book: boolean; positions: boolean; tools: boolean }; theme: ThemeId; fs: number; phoneTab: PhoneTab; zen: boolean; zenOpen: ZenOpen; superstar: boolean; lol: boolean; layout: Layout };
 }
 
 export const BOOK_MIN = 180, PANEL_MIN = 320;
@@ -61,7 +61,7 @@ export const DEFAULTS: Settings = {
   dismissedDexes: [],
   chart: { interval: '15m', pinnedIntervals: [], desktopPinnedIntervals: [...INTERVALS], volume: true, timezone: 'UTC', indicators: { positions: { on: true }, fills: { on: true }, drawings: { on: true }, ai: { on: true } }, studies: DEFAULT_STUDIES, favStudies: [], compare: {} },
   panel: { kind: 'market', sizeUnit: 'coin' },
-  display: { minimized: { trade: false, account: false, book: false, positions: false }, theme: THEMES[0].id, fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 0, panel: 0, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
+  display: { minimized: { trade: false, account: false, book: false, positions: false, tools: false }, theme: THEMES[0].id, fs: 14, phoneTab: 'trade', zen: false, zenOpen: { order: false, positions: false, book: false }, superstar: false, lol: false, layout: { book: 0, panel: 0, bottom: 0, sidebarTrade: 0, phone: 0, tallBook: 0, tallPanel: 0, tallMid: 0, tallBottom: 0 } }
 };
 
 const KEY = SETTINGS_KEY;

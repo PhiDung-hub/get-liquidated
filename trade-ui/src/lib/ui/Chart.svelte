@@ -309,8 +309,10 @@
   let railH = $state(0);
   let railMore = $state(false);
   const coarse = new MediaQuery('pointer: coarse');
+  const railShut = $derived(narrow.current && settings.display.minimized.tools);
   const railFit = $derived.by(() => {
-    const slot = coarse.current ? 36 : 32;
+    if (railShut) return 0;
+    const slot = narrow.current ? 30 : coarse.current ? 36 : 32;
     return railItems.length * slot + 24 <= railH ? railItems.length : Math.max(0, Math.floor((railH - 6) / slot) - 1);
   });
   const openGroup = $derived(lineLabels.groups.find((g) => g.key === lineLabels.open));
@@ -1174,6 +1176,7 @@
     <span class="tools">
       {#if canCompare}<button data-testid="compare-button" title="Compare markets on the left axis (up to 5)" aria-label={compact && room < 22.2 * settings.display.fs ? 'Compare' : null} onclick={(e) => (e.currentTarget.blur(), (ui.overlay = 'compare'))}>{compact && room < 22.2 * settings.display.fs ? '⇄' : 'Compare'}{compared().length ? ` ${compared().length}` : ''}</button>{/if}
       <button data-testid="chart-indicators" aria-haspopup="dialog" aria-expanded={ui.overlay === 'indicators'} aria-label={compact && room < 19.3 * settings.display.fs ? 'Indicators' : null} title="Indicators ({keys('indicators')})" onclick={(e) => (e.currentTarget.blur(), toggleIndicators())}>{compact && room < 19.3 * settings.display.fs ? 'ƒx' : 'ƒx Indicators'}</button>
+      {#if narrow.current}<button data-testid="chart-tools-toggle" class:on={!railShut} aria-label="Drawing tools" aria-pressed={!railShut} title={railShut ? 'Show drawing tools' : 'Hide drawing tools'} onclick={(e) => { e.currentTarget.blur(); settings.display.minimized.tools = !railShut; persist(); }}>{@render icon('M3 15l1-4 8-8 3 3-8 8zM10.5 4.5l3 3')}</button>{/if}
       {#if !narrow.current}<button data-testid="chart-funding-toggle" class:on={fundingOn} aria-label="Funding history" aria-pressed={fundingOn} disabled={spot} title={spot ? 'Funding is available on perpetual markets only' : 'Show hourly funding history and live rates'} onclick={(e) => (e.currentTarget.blur(), toggleFunding())}>{compact ? 'FR' : 'Funding'}</button>{/if}
       {#if !noAi()}<button class="copilot-launch" bind:offsetWidth={copilotButtonWidth} data-testid="chart-copilot" title="AI co-pilot: your own Claude Code, Codex or other MCP client coaches you on this chart" aria-expanded={ui.panelTab === 'ai'} onclick={(e) => { if (e.detail) e.currentTarget.blur(); ui.panelTab = ui.panelTab === 'ai' ? 'trade' : 'ai'; }}>Co-pilot{#if agent.suggestions.length}<span>{agent.suggestions.length}</span>{/if}{#if ui.panelTab === 'ai'}<span aria-hidden="true">✕</span>{/if}</button>{/if}
     </span>
@@ -1181,13 +1184,13 @@
     <button class="chart-full" class:on={fullscreen} data-testid="chart-fullscreen" aria-label={fullscreenLabel} aria-pressed={fullscreen} title={fullscreenLabel} onclick={toggleFullscreen}>{@render icon(fullscreen ? 'M2 6h4V2m6 0v4h4M2 12h4v4m6 0v-4h4' : 'M2 7V2h5m4 0h5v5M2 11v5h5m4 0h5v-5')}</button>
   </div>
   {#if coach.open && !narrow.current}{#await loadCoach() then Coach}{#if Coach}<Coach bars={coachBars} interval={settings.chart.interval} />{/if}{/await}{/if}
-  <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
+  {#if !railShut}<div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Drawing tools" data-testid="chart-rail" bind:clientHeight={railH}>
     {#each railItems.slice(0, railFit) as it (it.id)}
       {@render railButton(it)}
       {#if it.sep && railFit === railItems.length}<hr />{/if}
     {/each}
     {#if railFit > 0 && railFit < railItems.length}{@render moreTools()}{/if}
-  </div>
+  </div>{/if}
   <div class="chart" bind:this={el} bind:clientWidth={chartWidth} style:--cw={dock.w ? `${dock.w}px` : null} style:--ch={dock.h ? `${dock.h}px` : null} onwheelcapture={() => (resetShown = true)}>
     <div class="chart-refresh" class:shown={resetShown || away} style:top="{priceH - 28}px" style:left="{axisL + (chartWidth - axisL - axisW) / 2}px">      <button data-testid="chart-reset" title="Reset chart: auto-scale, default zoom, one-third blank space ({keys('chartReset')})" aria-label="Reset chart" onclick={(e) => (e.currentTarget.blur(), command('reset'))}>⟲</button>
 </div>
@@ -1519,6 +1522,10 @@
     .rail button, .ranges .more button { width: 34px; height: 34px; }
     .acts { display: inline-flex; }
     .acts button { width: 34px; height: 34px; }
+  }
+  @media (max-width: 900px) {
+    .rail { width: 32px; padding: 2px 0; }
+    .rail > button, .rail > .more > button { width: 28px; height: 28px; }
   }
   .iv-menu { display: inline-flex; align-items: stretch; color: var(--bright); }
   .iv-menu :global(button) { padding: 0 8px; }

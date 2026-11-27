@@ -106,3 +106,22 @@ export function levelError(buy: boolean, stop: number | null, limit: number | nu
   if (limit !== null && (buy ? limit <= offer : limit >= bid)) return `A ${buy ? 'long' : 'short'} position's limit must be ${buy ? 'above the buy' : 'below the sell'} price.`;
   return '';
 }
+export interface Deal { time: string; opened?: string; name: string; size: string; open: string; close: string; pnl: string }
+/** A closed deal's profit as a number; IG sends it as text such as `SGD-1,234.50`. */
+export const dealPnl = (d: Deal) => { const n = Number(d.pnl.replace('−', '-').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0; };
+export const dealKey = (d: Deal) => [d.time, d.name, d.size, d.open, d.close].join('|');
+/** Journal figures over closed deals: totals, and the same grouped by closing day (UTC) and by market. */
+export function journalOf(deals: Deal[]) {
+  const rows = deals.map(d => ({ ...d, value: dealPnl(d), day: d.time.slice(0, 10) }));
+  const sum = (list: typeof rows) => list.reduce((total, r) => total + r.value, 0);
+  const wins = rows.filter(r => r.value > 0), losses = rows.filter(r => r.value < 0);
+  const group = (key: 'day' | 'name') => [...new Set(rows.map(r => r[key]))].map(name => { const list = rows.filter(r => r[key] === name); return { name, trades: list.length, wins: list.filter(r => r.value > 0).length, net: sum(list) }; });
+  return { rows, net: sum(rows), wins: wins.length, losses: losses.length, avgWin: wins.length ? sum(wins) / wins.length : null, avgLoss: losses.length ? sum(losses) / losses.length : null,
+    factor: losses.length ? sum(wins) / -sum(losses) : null, days: group('day'), markets: group('name').sort((a, b) => b.net - a.net) };
+}
+/** How long a deal was held, as `2d 3h`, `1h 30m` or `12m`; '' when IG gave no opening time. */
+export function held(d: Deal) {
+  const ms = Date.parse(d.time + 'Z') - Date.parse((d.opened ?? '') + 'Z'), m = Math.floor(ms / 60000);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  return m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor(m % 1440 / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+}
